@@ -59,6 +59,8 @@ function RoomPage() {
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [availableFiles, setAvailableFiles] = useState<FileMeta[]>([]);
     const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
+    const [downloadedFilesids, setDownloadedFilesIds] = useState<string[]>([]);
+    const [downloadingFileIds, setDownloadingFileIds] = useState<string[]>([]);
     const [chatInput, setChatInput] = useState("");
     const storedFilesRef = useRef<Record<string, File>>({});
     const peersRef = useRef<Record<string, { pc: RTCPeerConnection; channel?: RTCDataChannel }>>({});
@@ -70,9 +72,18 @@ function RoomPage() {
     const currentReceivingFileIdRef = useRef<string | null>(null);
     const incomingFilesRef = useRef<Record<string, Uint8Array[]>>({});
 
+
     /* =========================================
        SOCKET + WEBRTC SETUP
     ========================================= */
+
+    const checkIsDownloaded = (fileId: string) => {
+        return downloadedFilesids.includes(fileId);
+    };
+
+    const checkIsDownloading = (fileId: string) => {
+        return downloadingFileIds.includes(fileId);
+    };
 
     const broadcastRaw = (data: DataMessage) => {
         const payload = JSON.stringify(data);
@@ -169,6 +180,7 @@ function RoomPage() {
     };
 
     const finalizeDownload = (fileId: string): void => {
+        setDownloadingFileIds(prev => prev.filter(id => id !== fileId));
         const chunks = incomingFilesRef.current[fileId];
         if (!chunks || chunks.length === 0) return;
 
@@ -184,10 +196,9 @@ function RoomPage() {
         a.href = url;
         a.download = meta?.fileName || "downloaded-file";
         a.click();
-
         URL.revokeObjectURL(url);
-
         delete incomingFilesRef.current[fileId];
+        setDownloadedFilesIds(prev => [...prev, fileId]);
     };
 
     const handleIncomingMessage = async (data: unknown) => {
@@ -575,6 +586,10 @@ function RoomPage() {
                         onDownload={requestFileDownload}
                         availableFiles={availableFiles}
                         onFileReady={handleFileReady}
+                        mySocketId={socket.id || ""}
+                        onCancelDownload={() => 0}
+                        checkIsDownloaded={checkIsDownloaded}
+                        checkIsDownloading={checkIsDownloading}
                     />
                 </div>
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { UploadCloud, Shield, Wifi, Sparkles, Plus } from "lucide-react";
 import { createRoom } from "../api/room";

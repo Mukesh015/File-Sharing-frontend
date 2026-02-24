@@ -36,3 +36,10 @@ body {
   scrollbar-width: thin;
   scrollbar-color: rgba(99, 102, 241, 0.6) transparent;
 }
+
+button {
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+  cursor: pointer;
+}

@@ -2,9 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { socket } from "../socket/socket";
 import { createPeerConnection, handleIncomingPeer } from "../socket/webrtc";
-
-import DevicesPanel from "../components/DevicesPanel";
-import TransfersPanel from "../components/TransfersPanel";
 import ChatPanel from "../components/ChatPanel";
 import FileSharePanel from "../components/FileSharePanel";
 import RoomHeader from "../components/RoomHeader";
@@ -20,26 +17,354 @@ interface ChatMessage {
     type?: "user" | "system";
 }
 
-function RoomPage() {
-    const { roomId } = useParams<{ roomId: string }>();
+interface FileMeta {
+    type: "file-meta";
+    fileId: string;
+    fileName: string;
+    size: number;
+    mimeType: string;
+    owner: string;
+}
 
+type DataMessage =
+    | {
+        type: "chat";
+        sender: string;
+        message: string;
+    }
+    | {
+        type: "system";
+        message: string;
+    }
+    | FileMeta
+    | {
+        type: "file-request";
+        fileId: string;
+        sender: string;
+    }
+    | {
+        type: "file-start";
+        fileId: string;
+    }
+    | {
+        type: "file-complete";
+        fileId: string;
+    };
+
+function RoomPage() {
+
+    const { roomId } = useParams<{ roomId: string }>();
     const [connected, setConnected] = useState(false);
     const [users, setUsers] = useState<User[]>([]);
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+    const [availableFiles, setAvailableFiles] = useState<FileMeta[]>([]);
+    const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
     const [chatInput, setChatInput] = useState("");
-
-    const peersRef = useRef<
-        Record<string, { pc: RTCPeerConnection; channel?: RTCDataChannel }>
-    >({});
-
+    const storedFilesRef = useRef<Record<string, File>>({});
+    const peersRef = useRef<Record<string, { pc: RTCPeerConnection; channel?: RTCDataChannel }>>({});
     const myNameRef = useRef(
         `User-${Math.floor(Math.random() * 1000)}`
     );
     const myName = myNameRef.current;
+    const receivingFileMetaRef = useRef<Record<string, FileMeta>>({});
+    const currentReceivingFileIdRef = useRef<string | null>(null);
+    const incomingFilesRef = useRef<Record<string, Uint8Array[]>>({});
 
     /* =========================================
        SOCKET + WEBRTC SETUP
     ========================================= */
+
+    const broadcastRaw = (data: DataMessage) => {
+        const payload = JSON.stringify(data);
+
+        Object.values(peersRef.current).forEach(peer => {
+            if (peer.channel?.readyState === "open") {
+                peer.channel.send(payload);
+            }
+        });
+    };
+
+    const handleFileReady = (file: File): void => {
+        const fileId = crypto.randomUUID();
+
+        storedFilesRef.current[fileId] = file;
+
+        const metaMessage: FileMeta = {
+            type: "file-meta",
+            fileId,
+            fileName: file.name,
+            size: file.size,
+            mimeType: file.type,
+            owner: socket.id!, // important
+        };
+
+        broadcastRaw(metaMessage);
+
+        // show locally too
+        setAvailableFiles(prev => [...prev, metaMessage]);
+    };
+
+    const requestFileDownload = (file: FileMeta) => {
+        const ownerPeer = peersRef.current[file.owner];
+
+        if (!ownerPeer?.channel) {
+            console.warn("Owner channel not available");
+            return;
+        }
+
+        ownerPeer.channel.send(
+            JSON.stringify({
+                type: "file-request",
+                fileId: file.fileId,
+                sender: socket.id,
+            })
+        );
+    };
+
+    const sendFile = async (
+        fileId: string,
+        channel: RTCDataChannel
+    ): Promise<void> => {
+
+        const file = storedFilesRef.current[fileId];
+        if (!file) {
+            console.warn("File not found:", fileId);
+            return;
+        }
+
+        // 🔹 Notify receiver file is starting
+        channel.send(
+            JSON.stringify({
+                type: "file-start",
+                fileId,
+            })
+        );
+
+        const chunkSize = 64 * 1024;
+        let offset = 0;
+
+        channel.bufferedAmountLowThreshold = 65536;
+
+        while (offset < file.size) {
+            const chunk = await file
+                .slice(offset, offset + chunkSize)
+                .arrayBuffer();
+
+            if (channel.bufferedAmount > 10 * chunkSize) {
+                await new Promise<void>((resolve) => {
+                    channel.onbufferedamountlow = () => resolve();
+                });
+            }
+
+            channel.send(chunk);
+            offset += chunkSize;
+        }
+
+        channel.send(
+            JSON.stringify({
+                type: "file-complete",
+                fileId,
+            })
+        );
+    };
+
+    const finalizeDownload = (fileId: string): void => {
+        const chunks = incomingFilesRef.current[fileId];
+        if (!chunks || chunks.length === 0) return;
+
+        const meta = receivingFileMetaRef.current[fileId];
+
+        const blob = new Blob(chunks as BlobPart[], {
+            type: meta?.mimeType || "application/octet-stream",
+        });
+
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = meta?.fileName || "downloaded-file";
+        a.click();
+
+        URL.revokeObjectURL(url);
+
+        delete incomingFilesRef.current[fileId];
+    };
+
+    const handleIncomingMessage = async (data: unknown) => {
+
+        /* ============================
+           🔹 Handle Binary (ArrayBuffer)
+        ============================ */
+        if (data instanceof ArrayBuffer) {
+            const fileId = currentReceivingFileIdRef.current;
+            if (!fileId) return;
+
+            if (!incomingFilesRef.current[fileId]) {
+                incomingFilesRef.current[fileId] = [];
+            }
+
+            // incomingFilesRef.current[fileId].push(new Uint8Array(data));
+            const chunk = new Uint8Array(data);
+
+            incomingFilesRef.current[fileId].push(chunk);
+
+            // 🔥 Calculate progress
+            const totalReceived = incomingFilesRef.current[fileId]
+                .reduce((acc, curr) => acc + curr.byteLength, 0);
+
+            const totalSize = receivingFileMetaRef.current[fileId]?.size || 1;
+
+            const percentage = Math.min(
+                Math.floor((totalReceived / totalSize) * 100),
+                100
+            );
+
+            setDownloadProgress(prev => ({
+                ...prev,
+                [fileId]: percentage,
+            }));
+            return;
+        }
+
+        /* ============================
+           🔹 Handle Blob (Safari / some browsers)
+        ============================ */
+        if (data instanceof Blob) {
+            const buffer = await data.arrayBuffer();
+            handleIncomingMessage(buffer);
+            return;
+        }
+
+        /* ============================
+           🔹 Must be JSON string
+        ============================ */
+        if (typeof data !== "string") return;
+
+        let parsed: DataMessage;
+
+        try {
+            parsed = JSON.parse(data);
+        } catch {
+            console.warn("Invalid JSON received:", data);
+            return;
+        }
+
+        switch (parsed.type) {
+
+            /* ============================
+               CHAT
+            ============================ */
+            case "chat":
+                setChatMessages(prev => [
+                    ...prev,
+                    {
+                        sender: parsed.sender,
+                        message: parsed.message,
+                    }
+                ]);
+                break;
+
+            /* ============================
+               SYSTEM
+            ============================ */
+            case "system":
+                setChatMessages(prev => [
+                    ...prev,
+                    {
+                        sender: "System",
+                        message: parsed.message,
+                        type: "system"
+                    }
+                ]);
+                break;
+
+            /* ============================
+               FILE META
+            ============================ */
+            case "file-meta":
+                receivingFileMetaRef.current[parsed.fileId] = parsed;
+                setAvailableFiles(prev => {
+                    const exists = prev.some(f => f.fileId === parsed.fileId);
+                    if (exists) return prev;
+                    return [...prev, parsed];
+                });
+                break;
+
+            /* ============================
+               FILE REQUEST
+            ============================ */
+            case "file-request":
+
+                // prevent sending to self
+                if (parsed.sender === socket.id) return;
+
+                const peer = peersRef.current[parsed.sender];
+
+                if (peer?.channel?.readyState === "open") {
+                    sendFile(parsed.fileId, peer.channel);
+                }
+
+                break;
+
+            /* ============================
+               FILE START
+            ============================ */
+            case "file-start":
+                currentReceivingFileIdRef.current = parsed.fileId;
+                incomingFilesRef.current[parsed.fileId] = [];
+                break;
+
+            /* ============================
+               FILE COMPLETE
+            ============================ */
+            case "file-complete":
+                finalizeDownload(parsed.fileId);
+
+                setDownloadProgress(prev => ({
+                    ...prev,
+                    [parsed.fileId]: 100,
+                }));
+
+                currentReceivingFileIdRef.current = null;
+                break;
+
+            default:
+                console.warn("Unknown message type:", parsed);
+        }
+    };
+
+    const broadcastMessage = (message: ChatMessage) => {
+        const payload = JSON.stringify(message);
+
+        Object.values(peersRef.current).forEach((peer) => {
+            if (peer.channel?.readyState === "open") {
+                peer.channel.send(payload);
+            }
+        });
+    };
+
+    const sendChatMessage = () => {
+        if (!chatInput.trim()) return;
+
+        const message: DataMessage = {
+            type: "chat",
+            sender: myName,
+            message: chatInput,
+        };
+
+        broadcastRaw(message);
+
+        setChatMessages(prev => [
+            ...prev,
+            { sender: myName, message: chatInput }
+        ]);
+
+        setChatInput("");
+    };
+
+    const handleKickUser = (socketId: string) => {
+        socket.emit("kick-user", { target: socketId });
+    };
 
     useEffect(() => {
         if (!roomId) return;
@@ -108,7 +433,10 @@ function RoomPage() {
             setChatMessages((prev) => [...prev, systemMessage]);
 
             // Broadcast to peers
-            broadcastMessage(systemMessage);
+            broadcastRaw({
+                type: "system",
+                message: `${newUser.userName} joined the room`
+            });
         });
 
         /* -------- OFFER RECEIVED -------- */
@@ -201,74 +529,70 @@ function RoomPage() {
         /* -------- CLEANUP -------- */
 
         return () => {
+
+            // 🔹 Close all peer connections cleanly
+            Object.values(peersRef.current).forEach(peer => {
+                try {
+                    peer.channel?.close();
+                    peer.pc.close();
+                } catch (err) {
+                    console.warn("Peer cleanup error:", err);
+                }
+            });
+
+            peersRef.current = {};
+
+            // 🔹 Remove listeners
             socket.removeAllListeners();
+
+            // 🔹 Disconnect socket
             socket.disconnect();
         };
     }, [roomId]);
 
-    /* =========================================
-       CHAT LOGIC
-    ========================================= */
-
-    const handleIncomingMessage = (data: string) => {
-        try {
-            const parsed: ChatMessage = JSON.parse(data);
-            setChatMessages((prev) => [...prev, parsed]);
-        } catch (err) {
-            console.error("Invalid message format");
-        }
-    };
-
-    const broadcastMessage = (message: ChatMessage) => {
-        const payload = JSON.stringify(message);
-
-        Object.values(peersRef.current).forEach((peer) => {
-            if (peer.channel?.readyState === "open") {
-                peer.channel.send(payload);
-            }
-        });
-    };
-
-    const sendChatMessage = () => {
-        if (!chatInput.trim()) return;
-
-        const message: ChatMessage = {
-            sender: myName,
-            message: chatInput,
-        };
-
-        broadcastMessage(message);
-        setChatMessages((prev) => [...prev, message]);
-        setChatInput("");
-    };
-
-    const handleKickUser = (socketId: string) => {
-        socket.emit("kick-user", { target: socketId });
-    };
-
-    /* =========================================
-       UI
-    ========================================= */
-
     return (
-        <div className="min-h-screen bg-linear-to-br from-slate-900 via-black to-slate-800 text-white p-6">
+        <div className="h-screen bg-gradient-to-br from-slate-900 via-black to-slate-800 text-white flex flex-col overflow-hidden">
 
-            <RoomHeader
-                roomId={roomId}
-                connected={connected}
-                totalUsers={users.length + 1}
-            />
+            {/* HEADER */}
+            <div className="px-4 sm:px-6 pt-4">
+                <RoomHeader
+                    roomId={roomId}
+                    connected={connected}
+                    totalUsers={users.length + 1}
+                    onKick={handleKickUser}
+                    myName={myName}
+                    users={users}
+                />
+            </div>
 
-            <div className="grid grid-cols-1 w-full lg:grid-cols-4 gap-6">
-                <div className="flex flex-col gap-6 lg:col-span-3">
-                    <DevicesPanel
-                        onKick={handleKickUser}
-                        myName={myName}
-                        users={users}
+            {/* MAIN CONTENT */}
+            <div className="flex-1 px-4 sm:px-6 pb-4 grid grid-cols-1 lg:grid-cols-4 gap-6 overflow-hidden">
+
+                {/* LEFT SIDE (Scrollable) */}
+                <div className="lg:col-span-3 flex flex-col gap-6 overflow-y-auto pr-2">
+                    <FileSharePanel
+                        downloadProgress={downloadProgress}
+                        onDownload={requestFileDownload}
+                        availableFiles={availableFiles}
+                        onFileReady={handleFileReady}
                     />
-                    <FileSharePanel />
                 </div>
 
+                {/* RIGHT SIDE (Fixed Chat) */}
+                <div className="hidden lg:flex h-full">
+                    <ChatPanel
+                        messages={chatMessages}
+                        myName={myName}
+                        chatInput={chatInput}
+                        setChatInput={setChatInput}
+                        sendChatMessage={sendChatMessage}
+                    />
+                </div>
+
+            </div>
+
+            {/* MOBILE CHAT (Bottom) */}
+            <div className="lg:hidden border-t border-white/10 p-3">
                 <ChatPanel
                     messages={chatMessages}
                     myName={myName}
@@ -278,7 +602,6 @@ function RoomPage() {
                 />
             </div>
 
-            <TransfersPanel />
         </div>
     );
 }

@@ -13,11 +13,10 @@ function HomePage() {
     };
 
     const handleCreateRoom = async () => {
-        const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
         try {
-            const res = await createRoom(roomId);
+            const res = await createRoom();
             if (res?.id) {
-                navigate(`/room/${roomId}`);
+                navigate(`/room/${res.id}`);
             }
         } catch (error) {
             console.log('error creating room', error)
@@ -79,9 +78,12 @@ function HomePage() {
                     {/* Create Room */}
                     <button
                         onClick={handleCreateRoom}
-                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition mb-6 cursor-pointer"
+                        className="w-full flex items-center justify-center gap-2 py-3 sm:py-3.5 rounded-xl 
+  bg-indigo-600 hover:bg-indigo-500 active:scale-[0.98]
+  text-sm sm:text-base text-white font-semibold transition-all duration-200 
+  mb-6"
                     >
-                        <Plus className="w-5 h-5 mr-2" />
+                        <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
                         Create Room
                     </button>
 
@@ -93,17 +95,22 @@ function HomePage() {
                     </div>
 
                     {/* Join */}
-                    <div className="flex gap-3">
+                    <div className="flex flex-col sm:flex-row gap-3">
                         <input
                             value={room}
                             onChange={(e) => setRoom(e.target.value)}
                             placeholder="Enter Room Code"
-                            className="flex-1 px-4 py-3 rounded-xl bg-white/10 text-white outline-none border border-white/10 focus:border-indigo-500"
+                            className="flex-1 px-4 py-3 rounded-xl bg-white/10 text-white outline-none 
+  border border-white/10 focus:border-indigo-500 
+  text-sm sm:text-base"
                         />
 
                         <button
+                            disabled={!room || room.length !== 6 || !/^[a-zA-Z0-9]+$/.test(room)}
                             onClick={joinRoom}
-                            className="px-6 py-3 rounded-xl bg-green-600 hover:bg-green-500 text-white font-semibold transition"
+                            className="w-full sm:w-auto px-6 py-3 rounded-xl 
+  bg-green-600 hover:bg-green-500 active:scale-[0.98]
+  text-sm sm:text-base text-white font-semibold transition-all duration-200"
                         >
                             Join
                         </button>

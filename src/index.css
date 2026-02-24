@@ -44,6 +44,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .icon-button {
   display: inline-flex;
   align-items: center;

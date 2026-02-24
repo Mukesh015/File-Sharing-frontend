@@ -1,6 +1,6 @@
 // socket/socket.ts
 import { io } from "socket.io-client";
 
-export const socket = io("http://119.18.62.146:8000", {
+export const socket = io(import.meta.env.VITE_APP_WEBSOCKET_URL, {
     autoConnect: false,
 });

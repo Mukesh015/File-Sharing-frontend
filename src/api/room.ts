@@ -1,7 +1,7 @@
 import { api } from "./axios";
 
-export const createRoom = async (roomId: string) => {
-    const { data } = await api.post("/rooms", { roomId });
+export const createRoom = async () => {
+    const { data } = await api.post("/rooms");
     return data;
 };
 

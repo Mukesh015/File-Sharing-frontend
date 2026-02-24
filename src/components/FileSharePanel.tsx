@@ -269,7 +269,7 @@ const FileSharePanel = ({
                             <div
                                 key={file.fileId}
                                 className={`relative rounded-lg p-3 flex items-center justify-between overflow-hidden backdrop-blur-sm transition
-                ${isDownloaded
+                                    ${isDownloaded
                                         ? "bg-green-500/5 border border-green-500/20"
                                         : isDownloading
                                             ? "bg-slate-800/50 border border-indigo-500/40 ring-1 ring-indigo-500/30"

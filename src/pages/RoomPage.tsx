@@ -5,6 +5,7 @@ import { createPeerConnection, handleIncomingPeer } from "../socket/webrtc";
 import ChatPanel from "../components/ChatPanel";
 import FileSharePanel from "../components/FileSharePanel";
 import RoomHeader from "../components/RoomHeader";
+import { createFileMeta } from "../api/fileMeta";
 
 interface User {
     socketId: string;
@@ -95,25 +96,75 @@ function RoomPage() {
         });
     };
 
-    const handleFileReady = (file: File): void => {
+    const handleFileReady = async (file: File): Promise<void> => {
+        if (!roomId || !socket.id) return;
+
         const fileId = crypto.randomUUID();
 
+        // Store actual file locally for WebRTC transfer
         storedFilesRef.current[fileId] = file;
 
-        const metaMessage: FileMeta = {
-            type: "file-meta",
-            fileId,
+        const payload = {
+            id: fileId,
             fileName: file.name,
             size: file.size,
             mimeType: file.type,
-            owner: socket.id!, // important
+            owner: socket.id!, // use socket.id for consistency across clients
+            roomId: roomId,
         };
 
-        broadcastRaw(metaMessage);
+        try {
+            // 1️⃣ Save to DB
+            await createFileMeta(payload);
 
-        // show locally too
-        setAvailableFiles(prev => [...prev, metaMessage]);
+            // 2️⃣ Broadcast to other users
+            socket.emit("file-meta", {
+                roomId,
+                meta: {
+                    fileId,
+                    fileName: file.name,
+                    size: file.size,
+                    mimeType: file.type,
+                    owner: socket.id!, // use socket.id for consistency across clients
+                },
+            });
+
+            // 3️⃣ Update local UI
+            setAvailableFiles((prev) => [
+                ...prev,
+                {
+                    type: "file-meta",
+                    fileId,
+                    fileName: file.name,
+                    size: file.size,
+                    mimeType: file.type,
+                    owner: socket.id!, // important to use socket.id here for consistency
+                },
+            ]);
+        } catch (error) {
+            console.error("Failed to save file metadata", error);
+        }
     };
+
+    // const handleFileReady = (file: File): void => {
+    //     const fileId = crypto.randomUUID();
+
+    //     storedFilesRef.current[fileId] = file;
+
+    //     const metaMessage: FileMeta = {
+    //         type: "file-meta",
+    //         fileId,
+    //         fileName: file.name,
+    //         size: file.size,
+    //         mimeType: file.type,
+    //         owner: socket.id!, // important
+    //     };
+
+    //     broadcastRaw(metaMessage);
+
+    //     // show locally too
+    //     setAvailableFiles(prev => [...prev, metaMessage]);
+    // };
 
     const requestFileDownload = (file: FileMeta) => {
         const ownerPeer = peersRef.current[file.owner];

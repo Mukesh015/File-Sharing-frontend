@@ -96,75 +96,33 @@ function RoomPage() {
         });
     };
 
-    const handleFileReady = async (file: File): Promise<void> => {
-        if (!roomId || !socket.id) return;
+    const handleFileReady = async (file: File): Promise<FileMeta> => {
+        if (!roomId || !socket.id) {
+            throw new Error("Missing roomId or socket.id");
+        }
 
-        const fileId = crypto.randomUUID();
-
-        // Store actual file locally for WebRTC transfer
-        storedFilesRef.current[fileId] = file;
-
-        const payload = {
-            id: fileId,
+        const savedFile = await createFileMeta({
             fileName: file.name,
             size: file.size,
             mimeType: file.type,
-            owner: socket.id!, // use socket.id for consistency across clients
-            roomId: roomId,
+            owner: socket.id,
+            roomId,
+        });
+
+        const normalized: FileMeta = {
+            type: "file-meta",
+            fileId: savedFile.id,
+            fileName: savedFile.fileName,
+            size: savedFile.size,
+            mimeType: savedFile.mimeType,
+            owner: savedFile.owner,
         };
 
-        try {
-            // 1️⃣ Save to DB
-            await createFileMeta(payload);
+        // store actual file for WebRTC transfer
+        storedFilesRef.current[normalized.fileId] = file;
 
-            // 2️⃣ Broadcast to other users
-            socket.emit("file-meta", {
-                roomId,
-                meta: {
-                    fileId,
-                    fileName: file.name,
-                    size: file.size,
-                    mimeType: file.type,
-                    owner: socket.id!, // use socket.id for consistency across clients
-                },
-            });
-
-            // 3️⃣ Update local UI
-            setAvailableFiles((prev) => [
-                ...prev,
-                {
-                    type: "file-meta",
-                    fileId,
-                    fileName: file.name,
-                    size: file.size,
-                    mimeType: file.type,
-                    owner: socket.id!, // important to use socket.id here for consistency
-                },
-            ]);
-        } catch (error) {
-            console.error("Failed to save file metadata", error);
-        }
+        return normalized;
     };
-
-    // const handleFileReady = (file: File): void => {
-    //     const fileId = crypto.randomUUID();
-
-    //     storedFilesRef.current[fileId] = file;
-
-    //     const metaMessage: FileMeta = {
-    //         type: "file-meta",
-    //         fileId,
-    //         fileName: file.name,
-    //         size: file.size,
-    //         mimeType: file.type,
-    //         owner: socket.id!, // important
-    //     };
-
-    //     broadcastRaw(metaMessage);
-
-    //     // show locally too
-    //     setAvailableFiles(prev => [...prev, metaMessage]);
-    // };
 
     const requestFileDownload = (file: FileMeta) => {
         const ownerPeer = peersRef.current[file.owner];
@@ -341,18 +299,6 @@ function RoomPage() {
                 break;
 
             /* ============================
-               FILE META
-            ============================ */
-            case "file-meta":
-                receivingFileMetaRef.current[parsed.fileId] = parsed;
-                setAvailableFiles(prev => {
-                    const exists = prev.some(f => f.fileId === parsed.fileId);
-                    if (exists) return prev;
-                    return [...prev, parsed];
-                });
-                break;
-
-            /* ============================
                FILE REQUEST
             ============================ */
             case "file-request":
@@ -434,6 +380,32 @@ function RoomPage() {
         /* -------- CONNECT -------- */
 
         socket.connect();
+
+        /* -------- FILE META RECEIVED FROM BACKEND -------- */
+
+        socket.on("file-meta", (data) => {
+            console.log("🔥 SOCKET file-meta:", data);
+
+            const normalized: FileMeta = {
+                type: "file-meta",
+                fileId: data.fileId ?? data.id,
+                fileName: data.fileName,
+                size: data.size,
+                mimeType: data.mimeType,
+                owner: data.owner,
+            };
+
+            receivingFileMetaRef.current[normalized.fileId] = normalized;
+
+            setAvailableFiles((prev) => {
+                const exists = prev.some(
+                    (f) => f.fileId === normalized.fileId
+                );
+                if (exists) return prev;
+
+                return [...prev, normalized];
+            });
+        });
 
         const handleConnect = () => {
             console.log("✅ Socket connected:", socket.id);
@@ -524,11 +496,8 @@ function RoomPage() {
 
             pc.ondatachannel = (event) => {
                 const channel = event.channel;
-
                 peersRef.current[sender].channel = channel;
-
-                channel.onmessage = (e) =>
-                    handleIncomingMessage(e.data);
+                channel.onmessage = (e) => handleIncomingMessage(e.data);
             };
         });
 
@@ -605,7 +574,15 @@ function RoomPage() {
             peersRef.current = {};
 
             // 🔹 Remove listeners
-            socket.removeAllListeners();
+            socket.off("file-meta");
+            socket.off("connect");
+            socket.off("disconnect");
+            socket.off("existing-users");
+            socket.off("user-joined");
+            socket.off("offer");
+            socket.off("answer");
+            socket.off("ice-candidate");
+            socket.off("user-left");
 
             // 🔹 Disconnect socket
             socket.disconnect();
@@ -658,7 +635,7 @@ function RoomPage() {
             </div>
 
             {/* MOBILE CHAT (Bottom) */}
-            <div className="lg:hidden border-t border-white/10 p-3">
+            {/* <div className="lg:hidden border-t border-white/10 p-3">
                 <ChatPanel
                     messages={chatMessages}
                     myName={myName}
@@ -666,7 +643,7 @@ function RoomPage() {
                     setChatInput={setChatInput}
                     sendChatMessage={sendChatMessage}
                 />
-            </div>
+            </div> */}
 
         </div>
     );

@@ -8,9 +8,12 @@ import {
     FolderDown,
     LucideUpload,
     Check,
+    History,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import imageCompression from "browser-image-compression";
+import { getFilesMeta } from "../api/fileMeta";
+import { useParams } from "react-router-dom";
 
 /* ================================
    TYPES
@@ -33,10 +36,11 @@ interface FileMeta {
     size: number;
     mimeType: string;
     owner: string;
+    createdAt?: string;
 }
 
 interface Props {
-    onFileReady: (file: File) => void;
+    onFileReady: (file: File) => Promise<FileMeta>;
     availableFiles: FileMeta[];
     onDownload: (file: FileMeta) => void;
     onCancelDownload: (file: FileMeta) => void;
@@ -73,8 +77,24 @@ const FileSharePanel = ({
     checkIsDownloaded,
     checkIsDownloading,
 }: Props) => {
+    const { roomId } = useParams<{ roomId: string }>();
+
     const inputRef = useRef<HTMLInputElement | null>(null);
     const [files, setFiles] = useState<FileItem[]>([]);
+    const [previousFiles, setPreviousFiles] = useState<FileMeta[]>([]);
+    const [, setIsLoading] = useState(false);
+
+    const getPreviousFiles = async (roomId: string) => {
+        try {
+            setIsLoading(true);
+            const data = await getFilesMeta(roomId);
+            setPreviousFiles(data.files || []);
+        } catch (err) {
+            console.error("Failed to fetch previous files:", err);
+        } finally {
+            setIsLoading(false);
+        }
+    }
 
     /* ================================
        HELPERS
@@ -142,20 +162,28 @@ const FileSharePanel = ({
             const compressedFile = await compressImage(file);
             const compressedSize = compressedFile.size;
 
-            newFiles.push({
-                id: crypto.randomUUID(),
-                file: compressedFile,
-                originalSize,
-                compressedSize,
-                progress: 0,
-                estimatedTime: estimateTime(compressedSize),
-                owner: mySocketId,
-            });
+            try {
+                // 🔥 Wait for backend to generate real ID
+                const savedFile = await onFileReady(compressedFile);
 
-            onFileReady(compressedFile);
+                // savedFile MUST return backend response now
+
+                newFiles.push({
+                    id: savedFile.fileId, // ✅ real backend ID
+                    file: compressedFile,
+                    originalSize,
+                    compressedSize,
+                    progress: 0,
+                    estimatedTime: estimateTime(compressedSize),
+                    owner: mySocketId,
+                });
+
+            } catch (err) {
+                console.error("Upload failed:", err);
+            }
         }
 
-        setFiles((prev) => [...prev, ...newFiles]);
+        setFiles(prev => [...prev, ...newFiles]);
     };
 
     const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
@@ -184,6 +212,12 @@ const FileSharePanel = ({
     /* ================================
        UI
     ================================ */
+
+    useEffect(() => {
+        if (roomId) {
+            getPreviousFiles(roomId);
+        }
+    }, [roomId]);
 
     return (
         <div className="bg-white/5 border border-white/10 rounded-2xl p-6 flex flex-col gap-6">
@@ -363,6 +397,28 @@ const FileSharePanel = ({
                 </button>
             </div>
 
+            {previousFiles && previousFiles?.length > 0 && (<div className="flex flex-col gap-3">
+                <h4 className="text-sm font-semibold flex items-center  text-white">
+                    <History className="w-4 h-4 inline mr-2" />
+                    Previously Shared Files
+                </h4>
+                {previousFiles.map((file) => (
+                    <div key={file.fileId} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-lg p-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                            <File className="w-4 h-4 text-gray-400" />
+                            <span className="text-sm text-gray-400">
+                                {file.fileName} ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                            </span>
+                        </div>
+                        <p className="text-sm text-gray-400 w-fit flex items-center gap-2">
+                            <span>{file.owner}</span>
+                            <Dot className="w-1 h-1 bg-gray-400 rounded-full mx-2" />
+                            <span>{new Date(file.createdAt || new Date()).toLocaleDateString()}</span>
+                        </p>
+                    </div>
+                ))}
+            </div>)}
+
             <input
                 ref={inputRef}
                 type="file"
@@ -375,7 +431,7 @@ const FileSharePanel = ({
                     }
                 }}
             />
-        </div>
+        </div >
     );
 };
 

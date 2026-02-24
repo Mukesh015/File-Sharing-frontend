@@ -1,7 +1,6 @@
 import { api } from "./axios";
 
 export const createFileMeta = async (payload: {
-    id: string;
     fileName: string;
     size: number;
     mimeType: string;
@@ -16,3 +15,8 @@ export const deleteFileMeta = async (fileId: string) => {
     const { data } = await api.delete(`/files/${fileId}`);
     return data;
 };
+
+export const getFilesMeta = async (roomId: string, page = 1, limit = 10) => {
+    const { data } = await api.get(`/files/room/${roomId}?page=${page}&limit=${limit}`);
+    return data;
+}

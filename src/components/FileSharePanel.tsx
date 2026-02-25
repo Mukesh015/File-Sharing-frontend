@@ -9,11 +9,18 @@ import {
     LucideUpload,
     Check,
     History,
+    ArrowDown,
+    ChevronDown,
+    Expand,
+    Minimize,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import imageCompression from "browser-image-compression";
 import { getFilesMeta } from "../api/fileMeta";
 import { useParams } from "react-router-dom";
+import { renderFileIcon } from "./getFileType";
+import InfoTooltip from "./InfoTooltip";
+import { formatBytes, formatETA } from "../utils/formatBytes.ts";
 
 /* ================================
    TYPES
@@ -48,20 +55,30 @@ interface Props {
     mySocketId: string;
     checkIsDownloaded: (fileId: string) => boolean;
     checkIsDownloading: (fileId: string) => boolean;
+    isOpen: boolean;
+    onOpenFilePanel: () => void;
+    fullscreen: boolean;
+    onToggleFullscreen: () => void;
+    transferStats: {
+        [fileId: string]: {
+            received: number;
+            speed: number;
+            eta: number;
+        };
+    };
 }
 
 /* ================================
    CONSTANTS
 ================================ */
 
-const MAX_FILE_SIZE = 100 * 1024 * 1024;
+const MAX_FILE_SIZE = 1000 * 1024 * 1024;
 const ALLOWED_TYPES = [
     "image/",
     "video/",
     "application/pdf",
     "application/zip",
 ];
-const ESTIMATED_SPEED_MBPS = 10;
 
 /* ================================
    COMPONENT
@@ -76,12 +93,18 @@ const FileSharePanel = ({
     mySocketId,
     checkIsDownloaded,
     checkIsDownloading,
+    isOpen,
+    // onOpenFilePanel,
+    fullscreen,
+    onToggleFullscreen,
+    transferStats
 }: Props) => {
     const { roomId } = useParams<{ roomId: string }>();
 
     const inputRef = useRef<HTMLInputElement | null>(null);
     const [files, setFiles] = useState<FileItem[]>([]);
     const [previousFiles, setPreviousFiles] = useState<FileMeta[]>([]);
+    const [showPreviousFiles, setShowingPreviousFiles] = useState(false);
     const [, setIsLoading] = useState(false);
 
     const getPreviousFiles = async (roomId: string) => {
@@ -96,32 +119,6 @@ const FileSharePanel = ({
         }
     }
 
-    /* ================================
-       HELPERS
-    ================================ */
-
-    const formatBytes = (bytes: number) => {
-        if (bytes === 0) return "0 Bytes";
-        const k = 1024;
-        const sizes = ["Bytes", "KB", "MB", "GB"];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return (
-            parseFloat((bytes / Math.pow(k, i)).toFixed(2)) +
-            " " +
-            sizes[i]
-        );
-    };
-
-    const estimateTime = (fileSize: number) => {
-        const speedBytesPerSec =
-            (ESTIMATED_SPEED_MBPS * 1024 * 1024) / 8;
-        const seconds = fileSize / speedBytesPerSec;
-
-        if (seconds < 60) return `${seconds.toFixed(1)} sec`;
-        if (seconds < 3600)
-            return `${(seconds / 60).toFixed(1)} min`;
-        return `${(seconds / 3600).toFixed(1)} hr`;
-    };
 
     const validateFile = (file: File) => {
         const isValidType = ALLOWED_TYPES.some((type) =>
@@ -130,7 +127,7 @@ const FileSharePanel = ({
 
         if (!isValidType) return "File type not supported";
         if (file.size > MAX_FILE_SIZE)
-            return "File too large (Max 100MB)";
+            return "File too large (Max 1GB)";
         return null;
     };
 
@@ -174,7 +171,7 @@ const FileSharePanel = ({
                     originalSize,
                     compressedSize,
                     progress: 0,
-                    estimatedTime: estimateTime(compressedSize),
+                    estimatedTime: formatETA(compressedSize),
                     owner: mySocketId,
                 });
 
@@ -201,10 +198,6 @@ const FileSharePanel = ({
         );
     };
 
-    /* ================================
-       DERIVED DATA
-    ================================ */
-
     const peerFiles = availableFiles.filter(
         (file) => file.owner !== mySocketId
     );
@@ -220,19 +213,19 @@ const FileSharePanel = ({
     }, [roomId]);
 
     return (
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-6 flex flex-col gap-6">
-
+        <div className={`flex flex-col overflow-hidden flex-1 bg-linear-to-br from-slate-900 via-black to-slate text-white p-5 rounded-2xl transition-all duration-300 border border-white/10 ${fullscreen ? "fixed inset-0 z-50 rounded-none h-screen w-screen" : "h-full"} ${isOpen ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        >
             {/* HEADER */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between w-full mb-5">
                 <div className="flex items-center gap-3">
                     <Share2 className="w-5 h-5 text-indigo-400" />
                     <h2 className="text-lg font-semibold text-indigo-400">
                         File Sharing
                     </h2>
                 </div>
-                <span className="text-xs text-indigo-400">
-                    Send files to connected peers
-                </span>
+                <button onClick={onToggleFullscreen} className="icon-button flex justify-center items-center">
+                    {fullscreen ? (<Minimize className="w-4 h-4 text-gray-400 hover:text-white transition" />) : (<Expand className="w-4 h-4 text-gray-400 hover:text-white transition" />)}
+                </button>
             </div>
 
             {/* ================================
@@ -240,21 +233,24 @@ const FileSharePanel = ({
       ================================= */}
             {files.length > 0 && (
                 <div className="flex flex-col gap-3">
-                    <h3 className="text-sm font-semibold text-gray-400">
-                        <LucideUpload className="w-4 h-4 inline mr-2" />
-                        Uploaded by You
-                    </h3>
+                    <div className="flex items-center justify-between w-full">
+                        <h3 className="text-sm font-semibold text-gray-400">
+                            <LucideUpload className="w-4 h-4 inline mr-2" />
+                            Uploaded by You
+                        </h3>
+                        <ArrowDown className="w-3 h-3 text-gray-400 inline ml-1" />
+                    </div>
 
                     {files.map((fileItem) => (
                         <div
                             key={fileItem.id}
-                            className="relative bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-3 backdrop-blur-sm"
+                            className="relative mb-3 bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-3 backdrop-blur-sm"
                         >
-                            <div className="absolute left-0 top-0 h-full w-[3px] bg-indigo-500/60 rounded-l-xl" />
+                            <div className="absolute left-0 top-0 h-full w-0.75 bg-indigo-500/60 rounded-l-xl" />
 
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3 min-w-0">
-                                    <File className="w-5 h-5 text-indigo-400 shrink-0" />
+                                    {renderFileIcon(fileItem.file.type, 20, "shrink-0")}
                                     <span className="text-sm font-medium truncate">
                                         {fileItem.file.name}
                                     </span>
@@ -291,6 +287,7 @@ const FileSharePanel = ({
                     </h3>
 
                     {peerFiles.map((file) => {
+                        const stats = transferStats[file.fileId];
                         const progress =
                             downloadProgress[file.fileId];
 
@@ -302,7 +299,7 @@ const FileSharePanel = ({
                         return (
                             <div
                                 key={file.fileId}
-                                className={`relative rounded-lg p-3 flex items-center justify-between overflow-hidden backdrop-blur-sm transition
+                                className={`relative mb-3 rounded-lg p-3 flex items-center justify-between overflow-hidden backdrop-blur-sm transition
                                     ${isDownloaded
                                         ? "bg-green-500/5 border border-green-500/20"
                                         : isDownloading
@@ -311,18 +308,31 @@ const FileSharePanel = ({
                                     }`}
                             >
                                 {/* FILE INFO */}
-                                <div className="flex items-center gap-3 flex-1 min-w-0">
-                                    <File className="w-4 h-4 text-white shrink-0" />
+                                <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1 min-w-0">
 
-                                    <span className="text-sm truncate">
-                                        {file.fileName}
-                                    </span>
+                                    {/* top row */}
+                                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                                        {renderFileIcon(file.mimeType, 20, "shrink-0")}
 
-                                    <Dot className="w-1 h-1 bg-gray-400 rounded-full shrink-0" />
+                                        <span className="text-sm truncate">
+                                            {file.fileName}
+                                        </span>
 
-                                    <span className="text-xs text-gray-400 shrink-0">
-                                        {(file.size / 1024 / 1024).toFixed(2)} MB
-                                    </span>
+                                        <Dot className="w-1 h-1 bg-gray-400 rounded-full shrink-0" />
+
+                                        <span className="text-xs text-gray-400 shrink-0">
+                                            {formatBytes(file.size)}
+                                        </span>
+                                    </div>
+
+                                    {/* speed text → moves below on mobile */}
+                                    {stats && (!isDownloaded || isDownloading) && (
+                                        <p className="text-xs text-gray-400 sm:ml-3">
+                                            {formatBytes(stats.speed)}/s (ETA - {formatETA(stats.eta)}) •{" "}
+                                            {formatBytes(stats.received)} / {formatBytes(file.size)} downloaded
+                                        </p>
+                                    )}
+
                                 </div>
 
                                 {/* ACTIONS */}
@@ -331,9 +341,10 @@ const FileSharePanel = ({
                                         disabled={
                                             isDownloaded || isDownloading
                                         }
-                                        onClick={() =>
+                                        onClick={() => {
+
                                             onDownload(file)
-                                        }
+                                        }}
                                         className="icon-button download-btn"
                                     >
                                         {isDownloaded ? (
@@ -355,13 +366,15 @@ const FileSharePanel = ({
 
                                 {/* PROGRESS BAR */}
                                 {progress !== undefined && (
-                                    <div className="absolute bottom-0 left-0 w-full h-[3px] bg-black/20">
-                                        <div
-                                            className="h-full bg-indigo-500 transition-all duration-200"
-                                            style={{
-                                                width: `${progress}%`,
-                                            }}
-                                        />
+                                    <div className="absolute bottom-0 left-0 w-full">
+
+                                        {/* progress bar */}
+                                        <div className="w-full h-1 bg-black/20">
+                                            <div
+                                                className="h-full bg-indigo-500 transition-all duration-200"
+                                                style={{ width: `${progress}%` }}
+                                            />
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -397,26 +410,55 @@ const FileSharePanel = ({
                 </button>
             </div>
 
-            {previousFiles && previousFiles?.length > 0 && (<div className="flex flex-col gap-3">
-                <h4 className="text-sm font-semibold flex items-center  text-white">
-                    <History className="w-4 h-4 inline mr-2" />
-                    Previously Shared Files
-                </h4>
-                {previousFiles.map((file) => (
-                    <div key={file.fileId} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-lg p-3">
-                        <div className="flex items-center gap-3 min-w-0">
-                            <File className="w-4 h-4 text-gray-400" />
-                            <span className="text-sm text-gray-400">
-                                {file.fileName} ({(file.size / 1024 / 1024).toFixed(2)} MB)
-                            </span>
+            {previousFiles && previousFiles?.length > 0 && (<div className="flex flex-col mt-5 gap-3">
+                <div className="flex w-full justify-between items-center">
+                    <h4 className="text-sm font-semibold flex items-center  text-white">
+                        <History className="w-4 h-4 inline mr-2" />
+                        Previously Shared Files
+                        <InfoTooltip text="These are files that were previously shared and are not available for download. You can ask for them to be re-shared." />
+                    </h4>
+                    <button onClick={() => setShowingPreviousFiles((v) => !v)} className={`flex items-center gap-1 text-md text-gray-400 hover:text-white transition-transform duration-300 ${showPreviousFiles ? "rotate-180" : ""
+                        }`}>
+                        <ChevronDown className="h-4 w-4 text-gray-400 inline" />
+                    </button>
+                </div>
+                <div className={showPreviousFiles ? "block" : "hidden"}>
+                    {previousFiles.map((file) => (
+                        <div
+                            key={file.fileId}
+                            className="flex items-center justify-between mb-2 gap-3 bg-white/5 border border-white/10 rounded-lg p-3"
+                        >
+                            {/* LEFT → icon + filename */}
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                                {/* <File className="w-4 h-4 text-gray-400 shrink-0" /> */}
+                                {renderFileIcon(file.mimeType, 20, "shrink-0")}
+                                <span className="text-sm text-gray-400 truncate">
+                                    {file.fileName}
+                                </span>
+                            </div>
+
+                            {/* RIGHT → size + owner + date */}
+                            <div className="flex items-center gap-2 text-xs text-gray-400 shrink-0 whitespace-nowrap">
+                                <span>
+                                    {(file.size / 1024 / 1024).toFixed(2)}MB
+                                </span>
+
+                                <Dot className="w-1 h-1 bg-gray-400 rounded-full" />
+
+                                <span className="truncate max-w-17.5 sm:max-w-30">
+                                    {file.owner}
+                                </span>
+
+                                <Dot className="w-1 h-1 bg-gray-400 rounded-full" />
+
+                                <span>
+                                    {new Date(file.createdAt || new Date()).toLocaleDateString()}
+                                </span>
+                            </div>
                         </div>
-                        <p className="text-sm text-gray-400 w-fit flex items-center gap-2">
-                            <span>{file.owner}</span>
-                            <Dot className="w-1 h-1 bg-gray-400 rounded-full mx-2" />
-                            <span>{new Date(file.createdAt || new Date()).toLocaleDateString()}</span>
-                        </p>
-                    </div>
-                ))}
+                    ))}
+                </div>
+
             </div>)}
 
             <input

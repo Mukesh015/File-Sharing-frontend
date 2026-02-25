@@ -60,6 +60,11 @@ function RoomPage() {
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [availableFiles, setAvailableFiles] = useState<FileMeta[]>([]);
     const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
+    const [isChatPanelOpen, setIsChatPanelOpen] = useState(true);
+    const [isFilePanelOpen, setIsFilePanelOpen] = useState(true);
+    const [fullscreenFilePanel, setFullscreenFilePanel] = useState(false);
+    const [fullscreenChat, setFullscreenChat] = useState(false);
+
     const [downloadedFilesids, setDownloadedFilesIds] = useState<string[]>([]);
     const [downloadingFileIds, setDownloadingFileIds] = useState<string[]>([]);
     const [chatInput, setChatInput] = useState("");
@@ -73,10 +78,83 @@ function RoomPage() {
     const currentReceivingFileIdRef = useRef<string | null>(null);
     const incomingFilesRef = useRef<Record<string, Uint8Array[]>>({});
 
+    const [transferStats, setTransferStats] = useState<{
+        [fileId: string]: {
+            received: number;
+            speed: number;
+            eta: number;
+            lastBytes: number;
+            lastTime: number;
+        };
+    }>({});
+
 
     /* =========================================
        SOCKET + WEBRTC SETUP
     ========================================= */
+
+    const updateFileStats = (fileId: string, chunkSize: number, fileSize: number) => {
+        setTransferStats(prev => {
+            const now = Date.now();
+
+            const stat = prev[fileId] || {
+                received: 0,
+                speed: 0,
+                eta: 0,
+                lastBytes: 0,
+                lastTime: now,
+            };
+
+            const received = stat.received + chunkSize;
+
+            const bytesDiff = received - stat.lastBytes;
+            const timeDiff = (now - stat.lastTime) / 1000 || 1;
+
+            const currentSpeed = bytesDiff / timeDiff;
+
+            const smoothSpeed = stat.speed * 0.7 + currentSpeed * 0.3;
+
+            const remaining = fileSize - received;
+            const eta = smoothSpeed ? remaining / smoothSpeed : 0;
+
+            return {
+                ...prev,
+                [fileId]: {
+                    received,
+                    speed: smoothSpeed,
+                    eta,
+                    lastBytes: received,
+                    lastTime: now,
+                },
+            };
+        });
+    }
+
+    const handleFullScreenFilePanel = () => {
+        setFullscreenFilePanel(prev => !prev);
+    };
+
+    const handleToggleChatFullscreen = () => {
+        setFullscreenChat(prev => !prev);
+        if (fullscreenFilePanel) {
+            setFullscreenFilePanel(false);
+
+        }
+    };
+
+    const handleOpenFilePanel = () => {
+        setIsFilePanelOpen(prev => !prev);
+        if (fullscreenChat) {
+            setFullscreenChat(false);
+        }
+    };
+
+    const handleOpenChatPanel = () => {
+        setIsChatPanelOpen(prev => !prev);
+        if (fullscreenFilePanel) {
+            setFullscreenFilePanel(false);
+        }
+    };
 
     const checkIsDownloaded = (fileId: string) => {
         return downloadedFilesids.includes(fileId);
@@ -225,6 +303,10 @@ function RoomPage() {
 
             // incomingFilesRef.current[fileId].push(new Uint8Array(data));
             const chunk = new Uint8Array(data);
+
+            const fileSize = receivingFileMetaRef.current[fileId]?.size || 0;
+
+            updateFileStats(fileId, chunk.byteLength, fileSize);
 
             incomingFilesRef.current[fileId].push(chunk);
 
@@ -590,10 +672,10 @@ function RoomPage() {
     }, [roomId]);
 
     return (
-        <div className="h-screen bg-gradient-to-br from-slate-900 via-black to-slate-800 text-white flex flex-col overflow-hidden">
+        <div className="h-screen bg-linear-to-br from-slate-900 via-black to-slate-800 text-white flex flex-col overflow-hidden">
 
             {/* HEADER */}
-            <div className="px-4 sm:px-6 pt-4">
+            <div className="px-4 sm:px-6 pt-4 mb-5">
                 <RoomHeader
                     roomId={roomId}
                     connected={connected}
@@ -601,6 +683,10 @@ function RoomPage() {
                     onKick={handleKickUser}
                     myName={myName}
                     users={users}
+                    isChatPanelOpen={isChatPanelOpen}
+                    onOpenChatPanel={handleOpenChatPanel}
+                    isFilePanelOpen={isFilePanelOpen}
+                    onOpenFilePanel={handleOpenFilePanel}
                 />
             </div>
 
@@ -618,32 +704,45 @@ function RoomPage() {
                         onCancelDownload={() => 0}
                         checkIsDownloaded={checkIsDownloaded}
                         checkIsDownloading={checkIsDownloading}
+                        isOpen={isFilePanelOpen}
+                        onOpenFilePanel={handleOpenFilePanel}
+                        fullscreen={fullscreenFilePanel}
+                        onToggleFullscreen={handleFullScreenFilePanel}
+                        transferStats={transferStats}
                     />
                 </div>
 
                 {/* RIGHT SIDE (Fixed Chat) */}
-                <div className="hidden lg:flex h-full">
+                <div className="hidden lg:flex h-full flex-1 min-h-0">
                     <ChatPanel
                         messages={chatMessages}
                         myName={myName}
                         chatInput={chatInput}
                         setChatInput={setChatInput}
                         sendChatMessage={sendChatMessage}
+                        isOpen={isChatPanelOpen}
+                        fullscreen={fullscreenChat}
+                        onToggleFullscreen={handleToggleChatFullscreen}
+                        isFilePanelHidden={!isFilePanelOpen}
                     />
                 </div>
 
             </div>
 
             {/* MOBILE CHAT (Bottom) */}
-            {/* <div className="lg:hidden border-t border-white/10 p-3">
+            <div className="lg:hidden p-3 h-full flex-1 min-h-0">
                 <ChatPanel
                     messages={chatMessages}
                     myName={myName}
                     chatInput={chatInput}
                     setChatInput={setChatInput}
                     sendChatMessage={sendChatMessage}
+                    isOpen={isChatPanelOpen}
+                    fullscreen={fullscreenChat}
+                    onToggleFullscreen={handleToggleChatFullscreen}
+                    isFilePanelHidden={!isFilePanelOpen}
                 />
-            </div> */}
+            </div>
 
         </div>
     );

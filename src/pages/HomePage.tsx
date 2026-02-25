@@ -1,12 +1,26 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { UploadCloud, Shield, Wifi, Sparkles, Plus } from "lucide-react";
-import { createRoom } from "../api/room";
+import { createRoom, getRoom } from "../api/room";
 import NameModal from "../components/NameModal";
 
 function HomePage() {
     const navigate = useNavigate();
     const [room, setRoom] = useState("");
+    const [errMsg, setErrMsg] = useState("");
+
+    const handleFindRoom = async () => {
+        try {
+            const res = await getRoom(room);
+            if (res?.id) {
+                navigate(`/room/${res.id}`);
+            } else {
+                setErrMsg((res?.message || "Room does not exist") + ", please check the code and try again or create a new room.");
+            }
+        } catch (error) {
+            console.log('error during find room', error)
+        }
+    }
 
     const handleSaveUserName = (name: string) => {
         localStorage.setItem("name", name);
@@ -21,11 +35,6 @@ function HomePage() {
         } catch (error) {
             console.log('error creating room', error)
         }
-    };
-
-    const joinRoom = () => {
-        if (!room) return;
-        navigate(`/room/${room.toUpperCase()}`);
     };
 
     return (
@@ -100,14 +109,15 @@ function HomePage() {
                             value={room}
                             onChange={(e) => setRoom(e.target.value)}
                             placeholder="Enter Room Code"
-                            className="flex-1 px-4 py-3 rounded-xl bg-white/10 text-white outline-none 
-  border border-white/10 focus:border-indigo-500 
-  text-sm sm:text-base"
+                            className={`flex-1 px-4 py-3 rounded-xl bg-white/10 text-white outline-none 
+  border ${errMsg ? "border-red-500" : "border-white/10"} 
+  focus:border-indigo-500 
+  text-sm sm:text-base`}
                         />
 
                         <button
                             disabled={!room || room.length !== 6 || !/^[a-zA-Z0-9]+$/.test(room)}
-                            onClick={joinRoom}
+                            onClick={handleFindRoom}
                             className="w-full sm:w-auto px-6 py-3 rounded-xl 
   bg-green-600 hover:bg-green-500 active:scale-[0.98]
   text-sm sm:text-base text-white font-semibold transition-all duration-200"
@@ -115,6 +125,12 @@ function HomePage() {
                             Join
                         </button>
                     </div>
+
+                    {errMsg && (
+                        <p className="text-center text-red-400 text-xs mt-2">
+                            {errMsg}
+                        </p>
+                    )}
 
                     <p className="text-center text-gray-500 text-xs mt-8">
                         Direct transfer • No server storage • End-to-end connection

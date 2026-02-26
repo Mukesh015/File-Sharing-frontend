@@ -1,60 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { socket } from "../socket/socket";
-import { createPeerConnection, handleIncomingPeer } from "../socket/webrtc";
+import { createFileMeta } from "../api/fileMeta";
 import ChatPanel from "../components/ChatPanel";
 import FileSharePanel from "../components/FileSharePanel";
 import RoomHeader from "../components/RoomHeader";
-import { createFileMeta } from "../api/fileMeta";
+import { socket } from "../socket/socket";
+import { createPeerConnection, handleIncomingPeer } from "../socket/webrtc";
+import type { ChatMessage, DataMessage, FileMeta, User } from "../types";
+import NameModal from "../components/NameModal";
 
-interface User {
-    socketId: string;
-    userName: string;
-}
+const RoomPage = () => {
 
-interface ChatMessage {
-    sender: string;
-    message: string;
-    type?: "user" | "system";
-}
-
-interface FileMeta {
-    type: "file-meta";
-    fileId: string;
-    fileName: string;
-    size: number;
-    mimeType: string;
-    owner: string;
-}
-
-type DataMessage =
-    | {
-        type: "chat";
-        sender: string;
-        message: string;
-    }
-    | {
-        type: "system";
-        message: string;
-    }
-    | FileMeta
-    | {
-        type: "file-request";
-        fileId: string;
-        sender: string;
-    }
-    | {
-        type: "file-start";
-        fileId: string;
-    }
-    | {
-        type: "file-complete";
-        fileId: string;
-    };
-
-function RoomPage() {
 
     const { roomId } = useParams<{ roomId: string }>();
+    const [myName, setMyName] = useState<string>(() => {
+        return localStorage.getItem("name") || "";
+    });
     const [connected, setConnected] = useState(false);
     const [users, setUsers] = useState<User[]>([]);
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -64,16 +25,16 @@ function RoomPage() {
     const [isFilePanelOpen, setIsFilePanelOpen] = useState(true);
     const [fullscreenFilePanel, setFullscreenFilePanel] = useState(false);
     const [fullscreenChat, setFullscreenChat] = useState(false);
-
     const [downloadedFilesids, setDownloadedFilesIds] = useState<string[]>([]);
     const [downloadingFileIds, setDownloadingFileIds] = useState<string[]>([]);
+    const [nameError, setNameError] = useState<string>("");
     const [chatInput, setChatInput] = useState("");
     const storedFilesRef = useRef<Record<string, File>>({});
     const peersRef = useRef<Record<string, { pc: RTCPeerConnection; channel?: RTCDataChannel }>>({});
-    const myNameRef = useRef(
-        `User-${Math.floor(Math.random() * 1000)}`
-    );
-    const myName = myNameRef.current;
+    // const myNameRef = useRef(
+    //     `User-${Math.floor(Math.random() * 1000)}`
+    // );
+    // const myName = myNameRef.current;
     const receivingFileMetaRef = useRef<Record<string, FileMeta>>({});
     const currentReceivingFileIdRef = useRef<string | null>(null);
     const incomingFilesRef = useRef<Record<string, Uint8Array[]>>({});
@@ -87,11 +48,6 @@ function RoomPage() {
             lastTime: number;
         };
     }>({});
-
-
-    /* =========================================
-       SOCKET + WEBRTC SETUP
-    ========================================= */
 
     const updateFileStats = (fileId: string, chunkSize: number, fileSize: number) => {
         setTransferStats(prev => {
@@ -290,9 +246,6 @@ function RoomPage() {
 
     const handleIncomingMessage = async (data: unknown) => {
 
-        /* ============================
-           🔹 Handle Binary (ArrayBuffer)
-        ============================ */
         if (data instanceof ArrayBuffer) {
             const fileId = currentReceivingFileIdRef.current;
             if (!fileId) return;
@@ -457,17 +410,49 @@ function RoomPage() {
     };
 
     useEffect(() => {
-        if (!roomId) return;
+        if (!roomId || !myName) return;
 
-        /* -------- CONNECT -------- */
+        /* ================= CONNECT ================= */
 
-        socket.connect();
+        if (!socket.connected) socket.connect();
 
-        /* -------- FILE META RECEIVED FROM BACKEND -------- */
+        const joinRoom = () => {
+            socket.emit("join-room", {
+                roomId,
+                userName: myName,
+            });
+        };
 
-        socket.on("file-meta", (data) => {
-            console.log("🔥 SOCKET file-meta:", data);
+        const handleConnect = () => {
+            if (!socket.id) return;
 
+            console.log("✅ Socket connected:", socket.id);
+            setConnected(true);
+
+            // ⭐ add self FIRST
+            setUsers(prev => {
+                const map = new Map<string, User>();
+
+                [...prev, { socketId: socket.id!, userName: myName }].forEach(u => {
+                    map.set(u.socketId, u);
+                });
+
+                return Array.from(map.values());
+            });
+
+            // ⭐ then join
+            joinRoom();
+        };
+
+        const handleNameTaken = () => {
+            localStorage.removeItem("name");
+            setMyName("");
+            setNameError("Name already exists in this room");
+        };
+
+        /* ================= FILE META ================= */
+
+        const handleFileMeta = (data: any) => {
             const normalized: FileMeta = {
                 type: "file-meta",
                 fileId: data.fileId ?? data.id,
@@ -479,37 +464,15 @@ function RoomPage() {
 
             receivingFileMetaRef.current[normalized.fileId] = normalized;
 
-            setAvailableFiles((prev) => {
-                const exists = prev.some(
-                    (f) => f.fileId === normalized.fileId
-                );
-                if (exists) return prev;
-
+            setAvailableFiles(prev => {
+                if (prev.some(f => f.fileId === normalized.fileId)) return prev;
                 return [...prev, normalized];
             });
-        });
-
-        const handleConnect = () => {
-            console.log("✅ Socket connected:", socket.id);
-            setConnected(true);
-
-            socket.emit("join-room", {
-                roomId,
-                userName: myName,
-            });
         };
 
-        const handleDisconnect = () => {
-            console.log("❌ Socket disconnected");
-            setConnected(false);
-        };
+        /* ================= EXISTING USERS → OFFER ================= */
 
-        socket.on("connect", handleConnect);
-        socket.on("disconnect", handleDisconnect);
-
-        /* -------- EXISTING USERS -------- */
-
-        socket.on("existing-users", async (existingUsers: User[]) => {
+        const handleExistingUsers = async (existingUsers: User[]) => {
             setUsers(existingUsers);
 
             for (const user of existingUsers) {
@@ -532,12 +495,12 @@ function RoomPage() {
                     offer,
                 });
             }
-        });
+        };
 
-        /* -------- NEW USER JOINED -------- */
+        /* ================= USER JOINED ================= */
 
-        socket.on("user-joined", (newUser: User) => {
-            setUsers((prev) => [...prev, newUser]);
+        const handleUserJoined = (newUser: User) => {
+            setUsers(prev => [...prev, newUser]);
 
             const systemMessage: ChatMessage = {
                 sender: "System",
@@ -545,25 +508,18 @@ function RoomPage() {
                 type: "system",
             };
 
-            // Add locally
-            setChatMessages((prev) => [...prev, systemMessage]);
+            setChatMessages(prev => [...prev, systemMessage]);
 
-            // Broadcast to peers
             broadcastRaw({
                 type: "system",
-                message: `${newUser.userName} joined the room`
+                message: `${newUser.userName} joined the room`,
             });
-        });
+        };
 
-        /* -------- OFFER RECEIVED -------- */
+        /* ================= OFFER ================= */
 
-        socket.on("offer", async ({ sender, offer }) => {
-            const pc = handleIncomingPeer(
-                socket,
-                sender,
-                handleIncomingMessage
-            );
-
+        const handleOffer = async ({ sender, offer }: any) => {
+            const pc = handleIncomingPeer(socket, sender, handleIncomingMessage);
             peersRef.current[sender] = { pc };
 
             await pc.setRemoteDescription(offer);
@@ -571,46 +527,41 @@ function RoomPage() {
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
 
-            socket.emit("answer", {
-                target: sender,
-                answer,
-            });
+            socket.emit("answer", { target: sender, answer });
 
             pc.ondatachannel = (event) => {
                 const channel = event.channel;
                 peersRef.current[sender].channel = channel;
                 channel.onmessage = (e) => handleIncomingMessage(e.data);
             };
-        });
+        };
 
-        /* -------- ANSWER RECEIVED -------- */
+        /* ================= ANSWER ================= */
 
-        socket.on("answer", async ({ sender, answer }) => {
+        const handleAnswer = async ({ sender, answer }: any) => {
             const peer = peersRef.current[sender];
             if (!peer) return;
 
             if (peer.pc.signalingState === "have-local-offer") {
                 await peer.pc.setRemoteDescription(answer);
             }
-        });
+        };
 
-        /* -------- ICE RECEIVED -------- */
+        /* ================= ICE ================= */
 
-        socket.on("ice-candidate", async ({ sender, candidate }) => {
+        const handleIce = async ({ sender, candidate }: any) => {
             const peer = peersRef.current[sender];
             if (!peer) return;
 
             await peer.pc.addIceCandidate(candidate);
-        });
+        };
 
-        /* -------- USER LEFT -------- */
+        /* ================= USER LEFT ================= */
 
-        socket.on("user-left", (socketId: string) => {
-
-            setUsers((prevUsers) => {
-
+        const handleUserLeft = (socketId: string) => {
+            setUsers(prevUsers => {
                 const leavingUser = prevUsers.find(
-                    (user) => user.socketId === socketId
+                    u => u.socketId === socketId
                 );
 
                 if (leavingUser) {
@@ -620,100 +571,119 @@ function RoomPage() {
                         type: "system",
                     };
 
-                    setChatMessages((prev) => [...prev, systemMessage]);
-                    broadcastMessage(systemMessage); // optional
+                    setChatMessages(prev => [...prev, systemMessage]);
+
+                    // ⭐ keep broadcast — same as your original
+                    broadcastMessage(systemMessage);
                 }
 
-                // return updated user list
-                return prevUsers.filter(
-                    (user) => user.socketId !== socketId
-                );
+                return prevUsers.filter(u => u.socketId !== socketId);
             });
 
-            // Close peer connection safely
             const peer = peersRef.current[socketId];
             if (peer) {
                 peer.pc.close();
+                delete peersRef.current[socketId];
             }
+        };
 
-            delete peersRef.current[socketId];
-        });
+        /* ================= REGISTER ================= */
 
-        /* -------- CLEANUP -------- */
+        socket.on("connect", handleConnect);
+        socket.on("name-taken", handleNameTaken);
+        socket.on("file-meta", handleFileMeta);
+        socket.on("existing-users", handleExistingUsers);
+        socket.on("user-joined", handleUserJoined);
+        socket.on("offer", handleOffer);
+        socket.on("answer", handleAnswer);
+        socket.on("ice-candidate", handleIce);
+        socket.on("user-left", handleUserLeft);
+
+        // ⭐ already connected case
+        if (socket.connected) handleConnect();
+
+        /* ================= CLEANUP ================= */
 
         return () => {
-
-            // 🔹 Close all peer connections cleanly
-            Object.values(peersRef.current).forEach(peer => {
-                try {
-                    peer.channel?.close();
-                    peer.pc.close();
-                } catch (err) {
-                    console.warn("Peer cleanup error:", err);
-                }
-            });
-
-            peersRef.current = {};
-
-            // 🔹 Remove listeners
-            socket.off("file-meta");
-            socket.off("connect");
-            socket.off("disconnect");
-            socket.off("existing-users");
-            socket.off("user-joined");
-            socket.off("offer");
-            socket.off("answer");
-            socket.off("ice-candidate");
-            socket.off("user-left");
-
-            // 🔹 Disconnect socket
-            socket.disconnect();
+            socket.off("connect", handleConnect);
+            socket.off("name-taken", handleNameTaken);
+            socket.off("file-meta", handleFileMeta);
+            socket.off("existing-users", handleExistingUsers);
+            socket.off("user-joined", handleUserJoined);
+            socket.off("offer", handleOffer);
+            socket.off("answer", handleAnswer);
+            socket.off("ice-candidate", handleIce);
+            socket.off("user-left", handleUserLeft);
         };
-    }, [roomId]);
+    }, [roomId, myName]);
 
     return (
-        <div className="h-screen bg-linear-to-br from-slate-900 via-black to-slate-800 text-white flex flex-col overflow-hidden">
+        <>
+            <NameModal
+                error={nameError}
+                onSubmit={(name) => {
+                    setMyName(name);
+                }}
+            />
+            <div className="h-screen bg-linear-to-br from-slate-900 via-black to-slate-800 text-white flex flex-col overflow-hidden">
 
-            {/* HEADER */}
-            <div className="px-4 sm:px-6 pt-4 mb-5">
-                <RoomHeader
-                    roomId={roomId}
-                    connected={connected}
-                    totalUsers={users.length + 1}
-                    onKick={handleKickUser}
-                    myName={myName}
-                    users={users}
-                    isChatPanelOpen={isChatPanelOpen}
-                    onOpenChatPanel={handleOpenChatPanel}
-                    isFilePanelOpen={isFilePanelOpen}
-                    onOpenFilePanel={handleOpenFilePanel}
-                />
-            </div>
-
-            {/* MAIN CONTENT */}
-            <div className=" px-4 sm:px-6 pb-4 grid grid-cols-1 lg:grid-cols-4 gap-6 overflow-hidden">
-
-                {/* LEFT SIDE (Scrollable) */}
-                <div className="lg:col-span-3 h-fit gap-6 overflow-y-auto pr-2">
-                    <FileSharePanel
-                        downloadProgress={downloadProgress}
-                        onDownload={requestFileDownload}
-                        availableFiles={availableFiles}
-                        onFileReady={handleFileReady}
-                        mySocketId={socket.id || ""}
-                        onCancelDownload={() => 0}
-                        checkIsDownloaded={checkIsDownloaded}
-                        checkIsDownloading={checkIsDownloading}
-                        isOpen={isFilePanelOpen}
+                {/* HEADER */}
+                <div className="px-4 sm:px-6 pt-4 mb-5">
+                    <RoomHeader
+                        roomId={roomId}
+                        connected={connected}
+                        totalUsers={users.length + 1}
+                        onKick={handleKickUser}
+                        myName={myName}
+                        users={users}
+                        isChatPanelOpen={isChatPanelOpen}
+                        onOpenChatPanel={handleOpenChatPanel}
+                        isFilePanelOpen={isFilePanelOpen}
                         onOpenFilePanel={handleOpenFilePanel}
-                        fullscreen={fullscreenFilePanel}
-                        onToggleFullscreen={handleFullScreenFilePanel}
-                        transferStats={transferStats}
                     />
                 </div>
 
-                {/* RIGHT SIDE (Fixed Chat) */}
-                <div className="hidden lg:flex h-full flex-1 min-h-0">
+                {/* MAIN CONTENT */}
+                <div className=" px-4 sm:px-6 pb-4 grid grid-cols-1 lg:grid-cols-4 gap-6 overflow-hidden">
+
+                    {/* LEFT SIDE (Scrollable) */}
+                    <div className="lg:col-span-3 h-fit gap-6 overflow-y-auto pr-2">
+                        <FileSharePanel
+                            downloadProgress={downloadProgress}
+                            onDownload={requestFileDownload}
+                            availableFiles={availableFiles}
+                            onFileReady={handleFileReady}
+                            mySocketId={socket.id || ""}
+                            onCancelDownload={() => 0}
+                            checkIsDownloaded={checkIsDownloaded}
+                            checkIsDownloading={checkIsDownloading}
+                            isOpen={isFilePanelOpen}
+                            onOpenFilePanel={handleOpenFilePanel}
+                            fullscreen={fullscreenFilePanel}
+                            onToggleFullscreen={handleFullScreenFilePanel}
+                            transferStats={transferStats}
+                        />
+                    </div>
+
+                    {/* RIGHT SIDE (Fixed Chat) */}
+                    <div className="hidden lg:flex h-full flex-1 min-h-0">
+                        <ChatPanel
+                            messages={chatMessages}
+                            myName={myName}
+                            chatInput={chatInput}
+                            setChatInput={setChatInput}
+                            sendChatMessage={sendChatMessage}
+                            isOpen={isChatPanelOpen}
+                            fullscreen={fullscreenChat}
+                            onToggleFullscreen={handleToggleChatFullscreen}
+                            isFilePanelHidden={!isFilePanelOpen}
+                        />
+                    </div>
+
+                </div>
+
+                {/* MOBILE CHAT (Bottom) */}
+                <div className="lg:hidden p-3 h-full flex-1 min-h-0">
                     <ChatPanel
                         messages={chatMessages}
                         myName={myName}
@@ -728,23 +698,7 @@ function RoomPage() {
                 </div>
 
             </div>
-
-            {/* MOBILE CHAT (Bottom) */}
-            <div className="lg:hidden p-3 h-full flex-1 min-h-0">
-                <ChatPanel
-                    messages={chatMessages}
-                    myName={myName}
-                    chatInput={chatInput}
-                    setChatInput={setChatInput}
-                    sendChatMessage={sendChatMessage}
-                    isOpen={isChatPanelOpen}
-                    fullscreen={fullscreenChat}
-                    onToggleFullscreen={handleToggleChatFullscreen}
-                    isFilePanelHidden={!isFilePanelOpen}
-                />
-            </div>
-
-        </div>
+        </>
     );
 }
 

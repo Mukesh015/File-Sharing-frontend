@@ -1,22 +1,27 @@
 import { useEffect, useState } from "react";
 
 interface Props {
-    onSubmit: (name: string) => void;
+    onSubmit?: (name: string) => void;
+    error: string;
 }
 
-const NameModal: React.FC<Props> = ({ onSubmit }) => {
+const NameModal: React.FC<Props> = ({ onSubmit, error }) => {
     const [name, setName] = useState("");
     const [isOpen, setIsOpen] = useState(false);
 
-    useEffect(() => {
-        localStorage.getItem("name") ? setIsOpen(false) : setIsOpen(true);
-    }, [localStorage.getItem("name")]);
-
     const handleSubmit = () => {
         if (!name.trim()) return;
-        onSubmit(name.trim());
+        const finalName = name.trim();
+        localStorage.setItem("name", finalName);   // ⭐ important
+        onSubmit?.(finalName);
         setIsOpen(false);
     };
+
+    useEffect(() => {
+        const saved = localStorage.getItem("name");
+        if (saved) setIsOpen(false);
+        else setIsOpen(true);
+    }, []);
 
     return (
         <div
@@ -55,6 +60,11 @@ const NameModal: React.FC<Props> = ({ onSubmit }) => {
                         placeholder="Your name"
                         className="w-full text-white bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-indigo-500 transition"
                     />
+                    {error && (
+                        <p className="text-red-400 text-sm text-center">
+                            {error}
+                        </p>
+                    )}
 
                     <button
                         onClick={handleSubmit}

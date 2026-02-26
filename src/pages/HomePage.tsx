@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { UploadCloud, Shield, Wifi, Sparkles, Plus } from "lucide-react";
 import { createRoom, getRoom } from "../api/room";
-import NameModal from "../components/NameModal";
 
 function HomePage() {
     const navigate = useNavigate();
@@ -22,10 +21,6 @@ function HomePage() {
         }
     }
 
-    const handleSaveUserName = (name: string) => {
-        localStorage.setItem("name", name);
-    };
-
     const handleCreateRoom = async () => {
         try {
             const res = await createRoom();
@@ -42,8 +37,8 @@ function HomePage() {
             <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-slate-900 via-black to-slate-800 flex items-center justify-center px-6">
 
                 {/* Glow blobs (SVG style backgrounds) */}
-                <div className="absolute w-[500px] h-[500px] bg-indigo-600/20 rounded-full blur-3xl top-[-120px] left-[-120px]" />
-                <div className="absolute w-[400px] h-[400px] bg-purple-600/20 rounded-full blur-3xl bottom-[-120px] right-[-120px]" />
+                <div className="absolute w-125 h-125 bg-indigo-600/20 rounded-full blur-3xl -top-30 -left-30" />
+                <div className="absolute w-100 h-100 bg-purple-600/20 rounded-full blur-3xl -bottom-30 -right-30" />
 
                 {/* Floating icons */}
                 <UploadCloud className="absolute top-20 left-20 w-10 h-10 text-indigo-400/30" />
@@ -87,10 +82,7 @@ function HomePage() {
                     {/* Create Room */}
                     <button
                         onClick={handleCreateRoom}
-                        className="w-full flex items-center justify-center gap-2 py-3 sm:py-3.5 rounded-xl 
-  bg-indigo-600 hover:bg-indigo-500 active:scale-[0.98]
-  text-sm sm:text-base text-white font-semibold transition-all duration-200 
-  mb-6"
+                        className="w-full flex items-center justify-center gap-2 py-3 sm:py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-[0.98] text-sm sm:text-base text-white font-semibold transition-all duration-200 mb-6"
                     >
                         <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
                         Create Room
@@ -109,18 +101,13 @@ function HomePage() {
                             value={room}
                             onChange={(e) => setRoom(e.target.value)}
                             placeholder="Enter Room Code"
-                            className={`flex-1 px-4 py-3 rounded-xl bg-white/10 text-white outline-none 
-  border ${errMsg ? "border-red-500" : "border-white/10"} 
-  focus:border-indigo-500 
-  text-sm sm:text-base`}
+                            className={`flex-1 px-4 py-3 rounded-xl bg-white/10 text-white outline-none border ${errMsg ? "border-red-500" : "border-white/10"} focus:border-indigo-500 text-sm sm:text-base`}
                         />
 
                         <button
                             disabled={!room || room.length !== 6 || !/^[a-zA-Z0-9]+$/.test(room)}
                             onClick={handleFindRoom}
-                            className="w-full sm:w-auto px-6 py-3 rounded-xl 
-  bg-green-600 hover:bg-green-500 active:scale-[0.98]
-  text-sm sm:text-base text-white font-semibold transition-all duration-200"
+                            className="w-full sm:w-auto px-6 py-3 rounded-xl bg-green-600 hover:bg-green-500 active:scale-[0.98] text-sm sm:text-base text-white font-semibold transition-all duration-200"
                         >
                             Join
                         </button>
@@ -137,8 +124,6 @@ function HomePage() {
                     </p>
                 </div>
             </div>
-
-            <NameModal onSubmit={(name) => handleSaveUserName(name)} />
         </>
     );
 }

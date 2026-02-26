@@ -139,9 +139,9 @@ const RoomHeader: React.FC<Props> = ({
                             {myName} (You)
                         </div>
 
-                        {users.map((user) => (
+                        {users.map((user, i) => (
                             <div
-                                key={user.socketId}
+                                key={user.socketId + i}
                                 className="group flex items-center justify-between bg-white/5 px-3 py-2 rounded-lg hover:bg-white/10 transition"
                             >
                                 <span>{user.userName}</span>

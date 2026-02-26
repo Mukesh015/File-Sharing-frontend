@@ -1,50 +1,23 @@
 import {
     UploadCloud,
-    File,
-    X,
-    Download,
-    Dot,
-    Share2,
+    File, Share2,
     FolderDown,
-    LucideUpload,
-    Check,
-    History,
+    LucideUpload, History,
     ArrowDown,
     ChevronDown,
     Expand,
-    Minimize,
+    Minimize
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import imageCompression from "browser-image-compression";
 import { getFilesMeta } from "../api/fileMeta";
 import { useParams } from "react-router-dom";
-import { renderFileIcon } from "./getFileType";
 import InfoTooltip from "./InfoTooltip";
-import { formatBytes, formatETA } from "../utils/formatBytes.ts";
-
-/* ================================
-   TYPES
-================================ */
-
-interface FileItem {
-    id: string;
-    file: File;
-    originalSize: number;
-    compressedSize: number;
-    progress: number;
-    estimatedTime: string;
-    owner: string;
-}
-
-interface FileMeta {
-    type: "file-meta";
-    fileId: string;
-    fileName: string;
-    size: number;
-    mimeType: string;
-    owner: string;
-    createdAt?: string;
-}
+import { formatETA } from "../utils/formatBytes.ts";
+import type { FileItem, FileMeta } from "../types.ts";
+import PeerFileCard from "./cards/PeerFileCard.tsx";
+import OwnFileCard from "./cards/OwnFileCard.tsx";
+import PreviousFileCard from "./cards/PreviousFileCard.tsx";
 
 interface Props {
     onFileReady: (file: File) => Promise<FileMeta>;
@@ -68,21 +41,13 @@ interface Props {
     };
 }
 
-/* ================================
-   CONSTANTS
-================================ */
-
-const MAX_FILE_SIZE = 1000 * 1024 * 1024;
-const ALLOWED_TYPES = [
-    "image/",
-    "video/",
-    "application/pdf",
-    "application/zip",
-];
-
-/* ================================
-   COMPONENT
-================================ */
+// const MAX_FILE_SIZE = 1000 * 1024 * 1024;
+// const ALLOWED_TYPES = [
+//     "image/",
+//     "video/",
+//     "application/pdf",
+//     "application/zip",
+// ];
 
 const FileSharePanel = ({
     onFileReady,
@@ -105,31 +70,26 @@ const FileSharePanel = ({
     const [files, setFiles] = useState<FileItem[]>([]);
     const [previousFiles, setPreviousFiles] = useState<FileMeta[]>([]);
     const [showPreviousFiles, setShowingPreviousFiles] = useState(false);
-    const [, setIsLoading] = useState(false);
 
     const getPreviousFiles = async (roomId: string) => {
         try {
-            setIsLoading(true);
             const data = await getFilesMeta(roomId);
             setPreviousFiles(data.files || []);
         } catch (err) {
             console.error("Failed to fetch previous files:", err);
-        } finally {
-            setIsLoading(false);
         }
     }
 
+    // const validateFile = (file: File) => {
+    //     const isValidType = ALLOWED_TYPES.some((type) =>
+    //         file.type.startsWith(type)
+    //     );
 
-    const validateFile = (file: File) => {
-        const isValidType = ALLOWED_TYPES.some((type) =>
-            file.type.startsWith(type)
-        );
-
-        if (!isValidType) return "File type not supported";
-        if (file.size > MAX_FILE_SIZE)
-            return "File too large (Max 1GB)";
-        return null;
-    };
+    //     if (!isValidType) return "File type not supported";
+    //     if (file.size > MAX_FILE_SIZE)
+    //         return "File too large (Max 1GB)";
+    //     return null;
+    // };
 
     const compressImage = async (file: File) => {
         if (!file.type.startsWith("image/")) return file;
@@ -141,19 +101,15 @@ const FileSharePanel = ({
         });
     };
 
-    /* ================================
-       FILE HANDLING
-    ================================ */
-
     const handleFiles = async (fileList: FileList) => {
         const newFiles: FileItem[] = [];
 
         for (let file of Array.from(fileList)) {
-            const error = validateFile(file);
-            if (error) {
-                alert(error);
-                continue;
-            }
+            // const error = validateFile(file);
+            // if (error) {
+            //     alert(error);
+            //     continue;
+            // }
 
             const originalSize = file.size;
             const compressedFile = await compressImage(file);
@@ -202,10 +158,6 @@ const FileSharePanel = ({
         (file) => file.owner !== mySocketId
     );
 
-    /* ================================
-       UI
-    ================================ */
-
     useEffect(() => {
         if (roomId) {
             getPreviousFiles(roomId);
@@ -213,8 +165,7 @@ const FileSharePanel = ({
     }, [roomId]);
 
     return (
-        <div className={`flex flex-col overflow-hidden flex-1 bg-linear-to-br from-slate-900 via-black to-slate text-white p-5 rounded-2xl transition-all duration-300 border border-white/10 ${fullscreen ? "fixed inset-0 z-50 rounded-none h-screen w-screen" : "h-full"} ${isOpen ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-        >
+        <div className={`flex flex-col overflow-hidden flex-1 bg-linear-to-br from-slate-900 via-black to-slate text-white p-5 rounded-2xl transition-all duration-300 border border-white/10 ${fullscreen ? "fixed inset-0 z-50 rounded-none h-screen w-screen" : "h-full"} ${isOpen ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
             {/* HEADER */}
             <div className="flex items-center justify-between w-full mb-5">
                 <div className="flex items-center gap-3">
@@ -228,9 +179,7 @@ const FileSharePanel = ({
                 </button>
             </div>
 
-            {/* ================================
-          YOUR UPLOADS
-      ================================= */}
+            {/* My uploads */}
             {files.length > 0 && (
                 <div className="flex flex-col gap-3">
                     <div className="flex items-center justify-between w-full">
@@ -242,43 +191,12 @@ const FileSharePanel = ({
                     </div>
 
                     {files.map((fileItem) => (
-                        <div
-                            key={fileItem.id}
-                            className="relative mb-3 bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-3 backdrop-blur-sm"
-                        >
-                            <div className="absolute left-0 top-0 h-full w-0.75 bg-indigo-500/60 rounded-l-xl" />
-
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3 min-w-0">
-                                    {renderFileIcon(fileItem.file.type, 20, "shrink-0")}
-                                    <span className="text-sm font-medium truncate">
-                                        {fileItem.file.name}
-                                    </span>
-                                </div>
-
-                                <button
-                                    onClick={() => removeFile(fileItem.id)}
-                                    className="icon-button cancel-btn"
-                                >
-                                    <X size={16} />
-                                </button>
-                            </div>
-
-                            {fileItem.originalSize !==
-                                fileItem.compressedSize && (
-                                    <span className="text-xs text-green-400 mt-1 block">
-                                        Compressed from{" "}
-                                        {formatBytes(fileItem.originalSize)}
-                                    </span>
-                                )}
-                        </div>
+                        <OwnFileCard key={fileItem.id} fileItem={fileItem} removeFile={removeFile} />
                     ))}
                 </div>
             )}
 
-            {/* ================================
-          PEER FILES
-      ================================= */}
+            {/* Peer files */}
             {peerFiles.length > 0 && (
                 <div className="flex flex-col gap-3">
                     <h3 className="text-sm font-semibold text-gray-400">
@@ -297,95 +215,22 @@ const FileSharePanel = ({
                             checkIsDownloading(file.fileId);
 
                         return (
-                            <div
+                            <PeerFileCard
                                 key={file.fileId}
-                                className={`relative mb-3 rounded-lg p-3 flex items-center justify-between overflow-hidden backdrop-blur-sm transition
-                                    ${isDownloaded
-                                        ? "bg-green-500/5 border border-green-500/20"
-                                        : isDownloading
-                                            ? "bg-slate-800/50 border border-indigo-500/40 ring-1 ring-indigo-500/30"
-                                            : "bg-slate-800/40 border border-slate-700/50 hover:bg-slate-800/60"
-                                    }`}
-                            >
-                                {/* FILE INFO */}
-                                <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1 min-w-0">
-
-                                    {/* top row */}
-                                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                                        {renderFileIcon(file.mimeType, 20, "shrink-0")}
-
-                                        <span className="text-sm truncate">
-                                            {file.fileName}
-                                        </span>
-
-                                        <Dot className="w-1 h-1 bg-gray-400 rounded-full shrink-0" />
-
-                                        <span className="text-xs text-gray-400 shrink-0">
-                                            {formatBytes(file.size)}
-                                        </span>
-                                    </div>
-
-                                    {/* speed text → moves below on mobile */}
-                                    {stats && (!isDownloaded || isDownloading) && (
-                                        <p className="text-xs text-gray-400 sm:ml-3">
-                                            {formatBytes(stats.speed)}/s (ETA - {formatETA(stats.eta)}) •{" "}
-                                            {formatBytes(stats.received)} / {formatBytes(file.size)} downloaded
-                                        </p>
-                                    )}
-
-                                </div>
-
-                                {/* ACTIONS */}
-                                <div className="flex items-center gap-3 ml-3">
-                                    <button
-                                        disabled={
-                                            isDownloaded || isDownloading
-                                        }
-                                        onClick={() => {
-
-                                            onDownload(file)
-                                        }}
-                                        className="icon-button download-btn"
-                                    >
-                                        {isDownloaded ? (
-                                            <Check className="w-4 h-4 text-green-500" />
-                                        ) : (
-                                            <Download className="w-4 h-4" />
-                                        )}
-                                    </button>
-
-                                    <button
-                                        onClick={() =>
-                                            onCancelDownload(file)
-                                        }
-                                        className="icon-button cancel-btn"
-                                    >
-                                        <X className="w-4 h-4" />
-                                    </button>
-                                </div>
-
-                                {/* PROGRESS BAR */}
-                                {progress !== undefined && (
-                                    <div className="absolute bottom-0 left-0 w-full">
-
-                                        {/* progress bar */}
-                                        <div className="w-full h-1 bg-black/20">
-                                            <div
-                                                className="h-full bg-indigo-500 transition-all duration-200"
-                                                style={{ width: `${progress}%` }}
-                                            />
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
+                                file={file}
+                                isDownloaded={isDownloaded}
+                                isDownloading={isDownloading}
+                                onCancelDownload={onCancelDownload}
+                                onDownload={onDownload}
+                                progress={progress}
+                                stats={stats}
+                            />
                         );
                     })}
                 </div>
             )}
 
-            {/* ================================
-          DROP ZONE
-      ================================= */}
+            {/* ================================DROP ZONE================================= */}
             <div
                 onDrop={handleDrop}
                 onDragOver={(e) =>
@@ -424,38 +269,7 @@ const FileSharePanel = ({
                 </div>
                 <div className={showPreviousFiles ? "block" : "hidden"}>
                     {previousFiles.map((file) => (
-                        <div
-                            key={file.fileId}
-                            className="flex items-center justify-between mb-2 gap-3 bg-white/5 border border-white/10 rounded-lg p-3"
-                        >
-                            {/* LEFT → icon + filename */}
-                            <div className="flex items-center gap-2 min-w-0 flex-1">
-                                {/* <File className="w-4 h-4 text-gray-400 shrink-0" /> */}
-                                {renderFileIcon(file.mimeType, 20, "shrink-0")}
-                                <span className="text-sm text-gray-400 truncate">
-                                    {file.fileName}
-                                </span>
-                            </div>
-
-                            {/* RIGHT → size + owner + date */}
-                            <div className="flex items-center gap-2 text-xs text-gray-400 shrink-0 whitespace-nowrap">
-                                <span>
-                                    {(file.size / 1024 / 1024).toFixed(2)}MB
-                                </span>
-
-                                <Dot className="w-1 h-1 bg-gray-400 rounded-full" />
-
-                                <span className="truncate max-w-17.5 sm:max-w-30">
-                                    {file.owner}
-                                </span>
-
-                                <Dot className="w-1 h-1 bg-gray-400 rounded-full" />
-
-                                <span>
-                                    {new Date(file.createdAt || new Date()).toLocaleDateString()}
-                                </span>
-                            </div>
-                        </div>
+                        <PreviousFileCard file={file} key={file.fileId} />
                     ))}
                 </div>
 
@@ -473,7 +287,7 @@ const FileSharePanel = ({
                     }
                 }}
             />
-        </div >
+        </div>
     );
 };
 

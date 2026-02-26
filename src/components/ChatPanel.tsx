@@ -71,7 +71,7 @@ const ChatPanel: React.FC<Props> = ({
       p-5 border border-white/10 shadow-lg transition-all duration-300
 
       ${fullscreen
-                    ? "fixed left-0 right-0 top-0 bottom-0 z-[999] rounded-none"
+                    ? "fixed left-0 right-0 top-0 bottom-0 z-999 rounded-none"
                     : "rounded-2xl h-full"
                 }
 
@@ -116,7 +116,7 @@ const ChatPanel: React.FC<Props> = ({
                     return (
                         <div key={index} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
                             <div
-                                className={`max-w-[75%] break-words px-4 py-2 rounded-2xl text-sm shadow-sm
+                                className={`max-w-[75%] wrap-break-word px-4 py-2 rounded-2xl text-sm shadow-sm
                 ${isMe
                                         ? "bg-indigo-600 text-white rounded-br-md"
                                         : "bg-white/10 text-white rounded-bl-md"

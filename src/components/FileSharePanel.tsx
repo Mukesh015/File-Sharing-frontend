@@ -191,7 +191,7 @@ const FileSharePanel = ({
                     </div>
 
                     {files.map((fileItem) => (
-                        <OwnFileCard key={fileItem.id} fileItem={fileItem} removeFile={removeFile} />
+                        <OwnFileCard ownerName={mySocketId} key={fileItem.id} fileItem={fileItem} removeFile={removeFile} />
                     ))}
                 </div>
             )}
@@ -213,6 +213,8 @@ const FileSharePanel = ({
                             checkIsDownloaded(file.fileId);
                         const isDownloading =
                             checkIsDownloading(file.fileId);
+
+                        console.log('isDownloading', isDownloading)
 
                         return (
                             <PeerFileCard

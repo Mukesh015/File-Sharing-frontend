@@ -8,7 +8,7 @@ export interface ChatMessage {
     sender: string;
     message: string;
     createdAt?: string;   // ISO string
-    type?: "user" | "system";
+    type?: "user" | "system" | "chat";
 
     replyTo?: {
         id?: string;
@@ -28,11 +28,7 @@ export interface FileMeta {
 }
 
 export type DataMessage =
-    | {
-        type: "chat";
-        sender: string;
-        message: string;
-    }
+    | ChatMessage
     | {
         type: "system";
         message: string;
@@ -50,7 +46,10 @@ export type DataMessage =
     | {
         type: "file-complete";
         fileId: string;
-    };
+    } | {
+        type: "file-cancel";
+        fileId: string;
+    }
 
 
 export interface FileItem {

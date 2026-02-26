@@ -1,6 +1,7 @@
-import { Copy, Wifi, Users, X, MessageSquareMore, MessageSquareOff, Share2, CircleSlash2 } from "lucide-react";
+import { Copy, Wifi, Users, X, MessageSquareMore, MessageSquareOff, Share2, CircleSlash2, BrushCleaning, User2, UserRoundCog, Unplug, ScreenShareOff } from "lucide-react";
 import { useState } from "react";
 import type { User } from "../types";
+import { socket } from "../socket/socket";
 
 interface Props {
     roomId?: string;
@@ -38,11 +39,18 @@ const RoomHeader: React.FC<Props> = ({
             await navigator.clipboard.writeText(roomId);
             setCopied(true);
             alert("Room ID copied to clipboard!");
+            setMenuOpen(false);
             setTimeout(() => setCopied(false), 2000);
+
         } catch (err) {
             console.error("Copy failed", err);
         }
     };
+
+    const handleDeleteRoom = () => {
+        if (!roomId) return;
+        socket.emit("delete-room", { roomId });
+    }
 
     return (
         <>
@@ -135,8 +143,19 @@ const RoomHeader: React.FC<Props> = ({
                     <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
 
                         {/* You */}
-                        <div className="bg-indigo-500/10 px-3 py-2 rounded-lg">
-                            {myName} (You)
+                        <div className="bg-indigo-500/10 px-3 py-2 rounded-lg flex items-center justify-between">
+                            <div className="flex items-center">
+                                <UserRoundCog className="w-4 h-4 text-indigo-400 inline-block mr-2" />
+                                <span>
+                                    {myName}
+                                </span>
+                            </div>
+                            <button
+                                // onClick={() => onKick(user.socketId)}
+                                className=" transition text-red-400 hover:text-red-300"
+                            >
+                                <Unplug className="h-4 w-4 text-red-500" />
+                            </button>
                         </div>
 
                         {users.map((user, i) => (
@@ -144,13 +163,16 @@ const RoomHeader: React.FC<Props> = ({
                                 key={user.socketId + i}
                                 className="group flex items-center justify-between bg-white/5 px-3 py-2 rounded-lg hover:bg-white/10 transition"
                             >
-                                <span>{user.userName}</span>
+                                <div>
+                                    <User2 className="w-4 h-4 text-gray-400 inline-block mr-2" />
+                                    <span>{user.userName}</span>
+                                </div>
 
                                 <button
                                     onClick={() => onKick(user.socketId)}
-                                    className="opacity-0 group-hover:opacity-100 transition text-red-400 hover:text-red-300"
+                                    className=" transition text-red-400 hover:text-red-300"
                                 >
-                                    Kick
+                                    <BrushCleaning className="h-4 w-4 text-red-500" />
                                 </button>
                             </div>
                         ))}
@@ -160,6 +182,7 @@ const RoomHeader: React.FC<Props> = ({
                                 Waiting for peers…
                             </div>
                         )}
+
                     </div>
                 </div>
             </div>
@@ -202,12 +225,9 @@ const RoomHeader: React.FC<Props> = ({
                 </button>
 
                 {/* Debug */}
-                <button className="flex items-center gap-2 w-full px-3 py-2 rounded-lg hover:bg-white/10 text-sm">
-                    <svg className="w-4 h-4 text-yellow-400" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path strokeWidth="2" d="M9 12h6M12 9v6" />
-                        <circle strokeWidth="2" cx="12" cy="12" r="9" />
-                    </svg>
-                    Debug Info
+                <button onClick={handleDeleteRoom} className="flex items-center gap-2 w-full px-3 py-2 rounded-lg hover:bg-white/10 text-sm">
+                    <ScreenShareOff className="w-4 h-4 text-red-700" />
+                    Delete Room
                 </button>
             </div>
         </>

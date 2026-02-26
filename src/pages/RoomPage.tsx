@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { createFileMeta } from "../api/fileMeta";
 import ChatPanel from "../components/ChatPanel";
 import FileSharePanel from "../components/FileSharePanel";
@@ -9,10 +9,11 @@ import { createPeerConnection, handleIncomingPeer } from "../socket/webrtc";
 import type { ChatMessage, DataMessage, FileMeta, User } from "../types";
 import NameModal from "../components/NameModal";
 import { getChatMessages, initiateMessage } from "../api/chat";
+import { getRoom } from "../api/room";
 
 const RoomPage = () => {
 
-
+    const navigate = useNavigate();
     const { roomId } = useParams<{ roomId: string }>();
     const [myName, setMyName] = useState(localStorage.getItem("name") || "");
     const [connected, setConnected] = useState(false);
@@ -31,15 +32,12 @@ const RoomPage = () => {
     const [chatInput, setChatInput] = useState("");
     const storedFilesRef = useRef<Record<string, File>>({});
     const peersRef = useRef<Record<string, { pc: RTCPeerConnection; channel?: RTCDataChannel }>>({});
-
-    console.log('chatMessages', chatMessages)
-    // const myNameRef = useRef(
-    //     `User-${Math.floor(Math.random() * 1000)}`
-    // );
-    // const myName = myNameRef.current;
     const receivingFileMetaRef = useRef<Record<string, FileMeta>>({});
     const currentReceivingFileIdRef = useRef<string | null>(null);
     const incomingFilesRef = useRef<Record<string, Uint8Array[]>>({});
+    const activeTransfersRef = useRef<Record<string, AbortController>>({});
+
+    console.log('downloadingFileIds', downloadingFileIds)
 
     const [transferStats, setTransferStats] = useState<{
         [fileId: string]: {
@@ -167,7 +165,7 @@ const RoomPage = () => {
             console.warn("Owner channel not available");
             return;
         }
-
+        setDownloadingFileIds(prev => [...prev, file.fileId]);
         ownerPeer.channel.send(
             JSON.stringify({
                 type: "file-request",
@@ -183,49 +181,45 @@ const RoomPage = () => {
     ): Promise<void> => {
 
         const file = storedFilesRef.current[fileId];
-        if (!file) {
-            console.warn("File not found:", fileId);
-            return;
-        }
+        if (!file) return;
 
-        // 🔹 Notify receiver file is starting
-        channel.send(
-            JSON.stringify({
-                type: "file-start",
-                fileId,
-            })
-        );
+        const controller = new AbortController();
+        activeTransfersRef.current[fileId] = controller;
+
+        channel.send(JSON.stringify({
+            type: "file-start",
+            fileId,
+        }));
 
         const chunkSize = 64 * 1024;
         let offset = 0;
 
-        channel.bufferedAmountLowThreshold = 65536;
-
         while (offset < file.size) {
+
+            // 🔥 STOP IF CANCELED
+            if (controller.signal.aborted) {
+                console.log("Transfer aborted:", fileId);
+                delete activeTransfersRef.current[fileId];
+                return;
+            }
+
             const chunk = await file
                 .slice(offset, offset + chunkSize)
                 .arrayBuffer();
-
-            if (channel.bufferedAmount > 10 * chunkSize) {
-                await new Promise<void>((resolve) => {
-                    channel.onbufferedamountlow = () => resolve();
-                });
-            }
 
             channel.send(chunk);
             offset += chunkSize;
         }
 
-        channel.send(
-            JSON.stringify({
-                type: "file-complete",
-                fileId,
-            })
-        );
+        channel.send(JSON.stringify({
+            type: "file-complete",
+            fileId,
+        }));
+
+        delete activeTransfersRef.current[fileId];
     };
 
     const finalizeDownload = (fileId: string): void => {
-        setDownloadingFileIds(prev => prev.filter(id => id !== fileId));
         const chunks = incomingFilesRef.current[fileId];
         if (!chunks || chunks.length === 0) return;
 
@@ -301,12 +295,21 @@ const RoomPage = () => {
 
         try {
             parsed = JSON.parse(data);
-        } catch {
+        } catch (e) {
             console.warn("Invalid JSON received:", data);
             return;
         }
 
         switch (parsed.type) {
+
+            // file metadata from other peers or self (after upload)
+            case "file-cancel":
+                const controller = activeTransfersRef.current[parsed.fileId];
+                if (controller) {
+                    controller.abort();
+                    delete activeTransfersRef.current[parsed.fileId];
+                }
+                break;
 
             /* ============================
                CHAT
@@ -317,6 +320,8 @@ const RoomPage = () => {
                     {
                         sender: parsed.sender,
                         message: parsed.message,
+                        createdAt: parsed.createdAt,
+                        id: parsed.id, // use provided id if available
                     }
                 ]);
                 break;
@@ -400,7 +405,12 @@ const RoomPage = () => {
         // ⭐ 1. Optimistic UI (instant)
         setChatMessages(prev => [
             ...prev,
-            { sender: myName, message: chatInput }
+            {
+                sender: myName,
+                message: chatInput,
+                createdAt: new Date().toISOString(),
+                id: `${Date.now()}`,
+            }
         ]);
 
         setChatInput("");
@@ -432,6 +442,44 @@ const RoomPage = () => {
             console.log("Error loading old chats:", error);
         }
     };
+
+    const handleCancelDownload = (file: FileMeta) => {
+        // stop local progress UI
+        setDownloadingFileIds(prev =>
+            prev.filter(id => id !== file.fileId)
+        );
+
+        setDownloadProgress(prev => {
+            const updated = { ...prev };
+            delete updated[file.fileId];
+            return updated;
+        });
+
+        delete incomingFilesRef.current[file.fileId];
+
+        // 🔥 Notify sender to stop sending
+        const ownerPeer = peersRef.current[file.owner];
+
+        if (ownerPeer?.channel?.readyState === "open") {
+            ownerPeer.channel.send(
+                JSON.stringify({
+                    type: "file-cancel",
+                    fileId: file.fileId,
+                })
+            );
+        }
+    };
+
+    const handleFindRoom = async (id: string) => {
+        try {
+            const res = await getRoom(id || "");
+            if (!res?.id) {
+                navigate("/");
+            }
+        } catch (error) {
+            console.log('error during find room', error)
+        }
+    }
 
     useEffect(() => {
         if (!roomId) return;
@@ -619,6 +667,23 @@ const RoomPage = () => {
             }
         };
 
+        const handleRoomDeleted = () => {
+            alert("Room has been deleted");
+
+            // Close all peer connections
+            Object.values(peersRef.current).forEach(peer => {
+                peer.channel?.close();
+                peer.pc.close();
+            });
+
+            peersRef.current = {};
+
+            socket.disconnect();
+
+            // redirect to homepage
+            window.location.href = "/";
+        };
+
         /* ================= REGISTER ================= */
 
         socket.on("connect", handleConnect);
@@ -630,6 +695,7 @@ const RoomPage = () => {
         socket.on("answer", handleAnswer);
         socket.on("ice-candidate", handleIce);
         socket.on("user-left", handleUserLeft);
+        socket.on("room-deleted", handleRoomDeleted);
 
         // ⭐ already connected case
         if (socket.connected) handleConnect();
@@ -646,8 +712,14 @@ const RoomPage = () => {
             socket.off("answer", handleAnswer);
             socket.off("ice-candidate", handleIce);
             socket.off("user-left", handleUserLeft);
+            socket.off("room-deleted", handleRoomDeleted);
         };
     }, [roomId, myName]);
+
+    useEffect(() => {
+        if (!roomId) return;
+        handleFindRoom(roomId);
+    }, [roomId]);
 
     return (
         <>
@@ -687,7 +759,7 @@ const RoomPage = () => {
                             availableFiles={availableFiles}
                             onFileReady={handleFileReady}
                             mySocketId={socket.id || ""}
-                            onCancelDownload={() => 0}
+                            onCancelDownload={handleCancelDownload}
                             checkIsDownloaded={checkIsDownloaded}
                             checkIsDownloading={checkIsDownloading}
                             isOpen={isFilePanelOpen}

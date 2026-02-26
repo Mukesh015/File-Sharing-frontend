@@ -4,9 +4,17 @@ export interface User {
 }
 
 export interface ChatMessage {
+    id?: string;
     sender: string;
     message: string;
+    createdAt?: string;   // ISO string
     type?: "user" | "system";
+
+    replyTo?: {
+        id?: string;
+        sender: string;
+        message: string;
+    };
 }
 
 export interface FileMeta {

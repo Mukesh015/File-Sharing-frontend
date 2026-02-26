@@ -8,6 +8,7 @@ import { socket } from "../socket/socket";
 import { createPeerConnection, handleIncomingPeer } from "../socket/webrtc";
 import type { ChatMessage, DataMessage, FileMeta, User } from "../types";
 import NameModal from "../components/NameModal";
+import { getChatMessages, initiateMessage } from "../api/chat";
 
 const RoomPage = () => {
 
@@ -30,6 +31,8 @@ const RoomPage = () => {
     const [chatInput, setChatInput] = useState("");
     const storedFilesRef = useRef<Record<string, File>>({});
     const peersRef = useRef<Record<string, { pc: RTCPeerConnection; channel?: RTCDataChannel }>>({});
+
+    console.log('chatMessages', chatMessages)
     // const myNameRef = useRef(
     //     `User-${Math.floor(Math.random() * 1000)}`
     // );
@@ -385,8 +388,8 @@ const RoomPage = () => {
         });
     };
 
-    const sendChatMessage = () => {
-        if (!chatInput.trim()) return;
+    const sendChatMessage = async () => {
+        if (!chatInput.trim() || !roomId) return;
 
         const message: DataMessage = {
             type: "chat",
@@ -394,19 +397,46 @@ const RoomPage = () => {
             message: chatInput,
         };
 
-        broadcastRaw(message);
-
+        // ⭐ 1. Optimistic UI (instant)
         setChatMessages(prev => [
             ...prev,
             { sender: myName, message: chatInput }
         ]);
 
         setChatInput("");
+
+        // ⭐ 2. Broadcast realtime (instant)
+        broadcastRaw(message);
+
+        // ⭐ 3. Save to DB (background)
+        try {
+            await initiateMessage(roomId, myName, message.message);
+        } catch (error) {
+            console.log("Error saving chat message:", error);
+        }
     };
 
     const handleKickUser = (socketId: string) => {
         socket.emit("kick-user", { target: socketId });
     };
+
+    const handleLoadOldChats = async (page: number) => {
+        if (!roomId) return;
+        try {
+            const data = await getChatMessages(roomId, page);
+            setChatMessages(prev => [
+                ...data ?? [],
+                ...prev,
+            ]);
+        } catch (error) {
+            console.log("Error loading old chats:", error);
+        }
+    };
+
+    useEffect(() => {
+        if (!roomId) return;
+        handleLoadOldChats(1); // load first page of chats on mount
+    }, [roomId]);
 
     useEffect(() => {
         if (!roomId || !myName) return;

@@ -13,15 +13,14 @@ const RoomPage = () => {
 
 
     const { roomId } = useParams<{ roomId: string }>();
-    const [myName, setMyName] = useState<string>(() => {
-        return localStorage.getItem("name") || "";
-    });
+    const [myName, setMyName] = useState(localStorage.getItem("name") || "");
     const [connected, setConnected] = useState(false);
     const [users, setUsers] = useState<User[]>([]);
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [availableFiles, setAvailableFiles] = useState<FileMeta[]>([]);
     const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
     const [isChatPanelOpen, setIsChatPanelOpen] = useState(true);
+    const [isNameModalOpen, setIsNameModalOpen] = useState(!myName);
     const [isFilePanelOpen, setIsFilePanelOpen] = useState(true);
     const [fullscreenFilePanel, setFullscreenFilePanel] = useState(false);
     const [fullscreenChat, setFullscreenChat] = useState(false);
@@ -421,6 +420,8 @@ const RoomPage = () => {
                 roomId,
                 userName: myName,
             });
+            setIsNameModalOpen(false);
+            localStorage.setItem("name", myName);
         };
 
         const handleConnect = () => {
@@ -448,6 +449,7 @@ const RoomPage = () => {
             localStorage.removeItem("name");
             setMyName("");
             setNameError("Name already exists in this room");
+            setIsNameModalOpen(true);
         };
 
         /* ================= FILE META ================= */
@@ -620,6 +622,7 @@ const RoomPage = () => {
     return (
         <>
             <NameModal
+                isOpen={isNameModalOpen}
                 error={nameError}
                 onSubmit={(name) => {
                     setMyName(name);

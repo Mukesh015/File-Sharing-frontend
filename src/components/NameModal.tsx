@@ -1,32 +1,23 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 interface Props {
     onSubmit?: (name: string) => void;
     error: string;
+    isOpen: boolean;
 }
 
-const NameModal: React.FC<Props> = ({ onSubmit, error }) => {
+const NameModal: React.FC<Props> = ({ onSubmit, error, isOpen }) => {
     const [name, setName] = useState("");
-    const [isOpen, setIsOpen] = useState(false);
 
     const handleSubmit = () => {
         if (!name.trim()) return;
-        const finalName = name.trim();
-        localStorage.setItem("name", finalName);   // ⭐ important
-        onSubmit?.(finalName);
-        setIsOpen(false);
+        onSubmit?.(name.trim());
     };
-
-    useEffect(() => {
-        const saved = localStorage.getItem("name");
-        if (saved) setIsOpen(false);
-        else setIsOpen(true);
-    }, []);
 
     return (
         <div
             className={`fixed inset-0 z-50 flex items-center justify-center transition-all duration-300
-        ${isOpen ? "opacity-100 visible" : "opacity-0 invisible"}
+        ${(isOpen || error) ? "opacity-100 visible" : "opacity-0 invisible"}
       `}
         >
             {/* Backdrop */}

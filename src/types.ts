@@ -32,6 +32,8 @@ export type DataMessage =
     | {
         type: "system";
         message: string;
+        createdAt: string;
+        id: string;
     }
     | FileMeta
     | {
@@ -49,7 +51,13 @@ export type DataMessage =
     } | {
         type: "file-cancel";
         fileId: string;
-    }
+    } | {
+        type: "typing";
+        sender: string;
+    } | {
+        type: "stop-typing";
+        sender: string;
+    };
 
 
 export interface FileItem {

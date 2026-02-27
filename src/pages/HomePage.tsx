@@ -10,7 +10,7 @@ function HomePage() {
 
     const handleFindRoom = async () => {
         try {
-            const res = await getRoom(room);
+            const res = await getRoom(room.toUpperCase());
             if (res?.id) {
                 navigate(`/room/${res.id}`);
             } else {

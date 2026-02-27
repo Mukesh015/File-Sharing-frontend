@@ -1,7 +1,9 @@
+import React from "react";
 import { Expand, Minimize, Radio, Reply, Send, SmilePlus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import formatTime from "../utils/formatTime";
 import type { ChatMessage } from "../types";
+import { formatChatDateLabel } from "../utils/formatChatDate";
 
 interface Props {
     messages: ChatMessage[];
@@ -13,6 +15,8 @@ interface Props {
     fullscreen: boolean;
     onToggleFullscreen: () => void;
     isFilePanelHidden: boolean;
+    broadcastTyping: () => void;
+    typingUsers: string[];
 }
 
 const ChatPanel: React.FC<Props> = ({
@@ -25,10 +29,17 @@ const ChatPanel: React.FC<Props> = ({
     fullscreen,
     onToggleFullscreen,
     isFilePanelHidden,
+    broadcastTyping,
+    typingUsers = [],
 }) => {
     const isDisabled = chatInput.trim() === "";
     const messagesRef = useRef<HTMLDivElement | null>(null);
     const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+
+    const handleTyping = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        setChatInput(e.target.value);
+        broadcastTyping();
+    };
 
     /* ✅ Auto scroll to bottom when new message */
     useEffect(() => {
@@ -88,66 +99,81 @@ const ChatPanel: React.FC<Props> = ({
                 className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-4 mb-4 pr-2"
             >
                 {messages.map((msg, index) => {
+
                     const isMe = msg.sender === myName;
                     const messageId = msg.id || `${index}`;
+                    const currentDateLabel = formatChatDateLabel(msg.createdAt || new Date().toISOString());
+                    const prevMessage = messages[index - 1];
+                    const prevDateLabel = prevMessage
+                        ? formatChatDateLabel(prevMessage.createdAt || new Date().toISOString())
+                        : null;
 
-                    if (msg.type === "system") {
-                        return (
-                            <div
-                                key={messageId}
-                                className="text-center text-xs text-gray-500 py-2"
-                            >
-                                {msg.message}
-                            </div>
-                        );
-                    }
+                    const shouldShowDate =
+                        !prevMessage || currentDateLabel !== prevDateLabel;
 
                     return (
-                        <div
-                            key={messageId}
-                            className={`flex ${isMe ? "justify-end" : "justify-start"}`}
-                        >
-                            <div className="relative group max-w-[80%]">
+                        <React.Fragment key={messageId}>
 
-                                {/* Sender name (only for others) */}
-                                {!isMe && (
-                                    <div className="text-xs text-gray-400 mb-1 ml-1">
-                                        {msg.sender}
-                                    </div>
-                                )}
-
-                                <div className={`flex items-end gap-3 ${isMe ? "flex-row-reverse" : "flex-row"}`}>
-                                    {/* Bubble */}
-                                    <div
-                                        className={`px-4 py-3 rounded-2xl text-sm leading-relaxed backdrop-blur-md transition wrap-break-word whitespace-pre-wrap ${isMe
-                                            ? "bg-indigo-600 text-white rounded-br-sm shadow-indigo-900/30 shadow-lg"
-                                            : "bg-slate-800/80 text-white rounded-bl-sm shadow-black/30 shadow-md"
-                                            }`}
-                                    >
-                                        <div>{msg.message}</div>
-
-                                        {/* Timestamp */}
-                                        <div className="mt-2 text-[11px] opacity-60 text-right">
-                                            {formatTime(msg.createdAt)}
-                                        </div>
-                                    </div>
-
-                                    {/* Action Buttons */}
-                                    <div className={`flex items-center gap-2 transition shrink-0 `}>
-                                        {/* Only show reaction for others */}
-                                        {!isMe && (
-                                            <button className="p-1 rounded-md hover:bg-white/10 transition">
-                                                <SmilePlus className="w-4 h-4 text-gray-400 hover:text-white transition" />
-                                            </button>
-                                        )}
-
-                                        <button onClick={() => setReplyingTo(msg)} className="p-1 rounded-md hover:bg-white/10 transition">
-                                            <Reply className="w-4 h-4 text-gray-400 hover:text-white transition" />
-                                        </button>
+                            {/* ✅ DATE LABEL (Only when date changes) */}
+                            {shouldShowDate && (
+                                <div className="flex justify-center my-4">
+                                    <div className="px-4 py-1 text-xs text-gray-400 bg-white/5 rounded-full backdrop-blur-sm">
+                                        {currentDateLabel}
                                     </div>
                                 </div>
-                            </div>
-                        </div>
+                            )}
+
+                            {/* SYSTEM MESSAGE */}
+                            {msg.type === "system" ? (
+                                <div className="text-center text-xs text-gray-500 py-2">
+                                    {msg.message}
+                                </div>
+                            ) : (
+                                <div
+                                    className={`flex ${isMe ? "justify-end" : "justify-start"}`}
+                                >
+                                    <div className="relative group max-w-[80%]">
+
+                                        {!isMe && (
+                                            <div className="text-xs text-gray-400 mb-1 ml-1">
+                                                {msg.sender}
+                                            </div>
+                                        )}
+
+                                        <div className={`flex items-end gap-3 ${isMe ? "flex-row-reverse" : "flex-row"}`}>
+
+                                            {/* BUBBLE */}
+                                            <div
+                                                className={`px-4 py-3 rounded-2xl text-sm leading-relaxed backdrop-blur-md whitespace-pre-wrap wrap-break-word ${isMe ? "bg-indigo-600 text-white rounded-br-sm shadow-indigo-900/30 shadow-lg" : "bg-slate-800/80 text-white rounded-bl-sm shadow-black/30 shadow-md"}`}
+                                            >
+                                                <div>{msg.message}</div>
+
+                                                <div className="mt-2 text-[11px] opacity-60 text-right">
+                                                    {formatTime(msg.createdAt || new Date().toISOString())}
+                                                </div>
+                                            </div>
+
+                                            {/* ACTIONS */}
+                                            <div className="flex items-center gap-2 shrink-0 opacity-0 group-hover:opacity-100 transition">
+                                                {!isMe && (
+                                                    <button className="p-1 rounded-md hover:bg-white/10 transition">
+                                                        <SmilePlus className="w-4 h-4 text-gray-400 hover:text-white" />
+                                                    </button>
+                                                )}
+
+                                                <button
+                                                    onClick={() => setReplyingTo(msg)}
+                                                    className="p-1 rounded-md hover:bg-white/10 transition"
+                                                >
+                                                    <Reply className="w-4 h-4 text-gray-400 hover:text-white" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                        </React.Fragment>
                     );
                 })}
             </div>
@@ -187,28 +213,49 @@ const ChatPanel: React.FC<Props> = ({
                         </div>
                     )}
                 </div>
-                <div className="flex gap-2 w-full">
-                    <textarea
-                        rows={1}
-                        value={chatInput}
-                        onChange={(e) => setChatInput(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === "Enter" && !e.shiftKey) {
-                                e.preventDefault();
-                                if (!isDisabled) sendChatMessage();
-                            }
-                        }}
-                        className="flex-1 resize-none outline-none bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-sm focus:border-indigo-500 transition"
-                        placeholder="Type message..."
-                    />
-
-                    <button
-                        onClick={sendChatMessage}
-                        disabled={isDisabled}
-                        className="bg-indigo-600 hover:bg-indigo-500 active:scale-95 transition-all px-4 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                <div className="space-y-1">
+                    <div
+                        className={`transition-all duration-300 ease-out overflow-hidden ${typingUsers.length > 0 ? "max-h-10 opacity-100 translate-y-0" : "max-h-0 opacity-0 -translate-y-1"}`}
                     >
-                        <Send className="w-4 h-4" />
-                    </button>
+                        {typingUsers.length > 0 && (
+                            <div className="text-xs text-gray-400 italic flex items-center gap-2">
+                                <span>
+                                    {typingUsers.join(", ")}{" "}
+                                    {typingUsers.length === 1 ? "is" : "are"} typing
+                                </span>
+
+                                {/* Animated dots */}
+                                <div className="flex gap-1">
+                                    <span className="w-1 h-1 bg-gray-400 rounded-full animate-bounce [animation-delay:0ms]" />
+                                    <span className="w-1 h-1 bg-gray-400 rounded-full animate-bounce [animation-delay:150ms]" />
+                                    <span className="w-1 h-1 bg-gray-400 rounded-full animate-bounce [animation-delay:300ms]" />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <div className="flex gap-2 w-full">
+                        <textarea
+                            rows={1}
+                            value={chatInput}
+                            onChange={(e) => handleTyping(e)}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter" && !e.shiftKey) {
+                                    e.preventDefault();
+                                    if (!isDisabled) sendChatMessage();
+                                }
+                            }}
+                            className="flex-1 resize-none outline-none bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-sm focus:border-indigo-500 transition"
+                            placeholder="Type message..."
+                        />
+
+                        <button
+                            onClick={sendChatMessage}
+                            disabled={isDisabled}
+                            className="bg-indigo-600 hover:bg-indigo-500 active:scale-95 transition-all px-4 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <Send className="w-4 h-4" />
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

@@ -28,6 +28,7 @@ const RoomPage = () => {
     const [fullscreenChat, setFullscreenChat] = useState(false);
     const [downloadedFilesids, setDownloadedFilesIds] = useState<string[]>([]);
     const [downloadingFileIds, setDownloadingFileIds] = useState<string[]>([]);
+    const [typingUsers, setTypingUsers] = useState<string[]>([]);
     const [nameError, setNameError] = useState<string>("");
     const [chatInput, setChatInput] = useState("");
     const storedFilesRef = useRef<Record<string, File>>({});
@@ -36,8 +37,8 @@ const RoomPage = () => {
     const currentReceivingFileIdRef = useRef<string | null>(null);
     const incomingFilesRef = useRef<Record<string, Uint8Array[]>>({});
     const activeTransfersRef = useRef<Record<string, AbortController>>({});
+    const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    console.log('downloadingFileIds', downloadingFileIds)
 
     const [transferStats, setTransferStats] = useState<{
         [fileId: string]: {
@@ -302,6 +303,20 @@ const RoomPage = () => {
 
         switch (parsed.type) {
 
+            //  🔥 Typing indicators
+            case "typing":
+                setTypingUsers(prev => {
+                    if (prev.includes(parsed.sender)) return prev;
+                    return [...prev, parsed.sender];
+                });
+                break;
+
+            case "stop-typing":
+                setTypingUsers(prev =>
+                    prev.filter(name => name !== parsed.sender)
+                );
+                break;
+
             // file metadata from other peers or self (after upload)
             case "file-cancel":
                 const controller = activeTransfersRef.current[parsed.fileId];
@@ -335,7 +350,9 @@ const RoomPage = () => {
                     {
                         sender: "System",
                         message: parsed.message,
-                        type: "system"
+                        type: "system",
+                        createdAt: parsed.createdAt,
+                        id: "system"
                     }
                 ]);
                 break;
@@ -432,12 +449,24 @@ const RoomPage = () => {
 
     const handleLoadOldChats = async (page: number) => {
         if (!roomId) return;
+
         try {
             const data = await getChatMessages(roomId, page);
-            setChatMessages(prev => [
-                ...data ?? [],
-                ...prev,
-            ]);
+
+            if (!data || data.length === 0) return;
+
+            setChatMessages(prev => {
+                // prevent duplicates
+                const existingIds = new Set(prev.map(m => m.id));
+
+                const filtered = data.filter((m: ChatMessage) => !existingIds.has(m.id));
+
+                return [
+                    ...filtered,
+                    ...prev,
+                ];
+            });
+
         } catch (error) {
             console.log("Error loading old chats:", error);
         }
@@ -480,6 +509,18 @@ const RoomPage = () => {
             console.log('error during find room', error)
         }
     }
+
+    const broadcastTyping = () => {
+        broadcastRaw({ type: "typing", sender: myName });
+
+        if (typingTimeoutRef.current) {
+            clearTimeout(typingTimeoutRef.current);
+        }
+
+        typingTimeoutRef.current = setTimeout(() => {
+            broadcastRaw({ type: "stop-typing", sender: myName });
+        }, 1500);
+    };
 
     useEffect(() => {
         if (!roomId) return;
@@ -593,6 +634,8 @@ const RoomPage = () => {
             broadcastRaw({
                 type: "system",
                 message: `${newUser.userName} joined the room`,
+                createdAt: new Date().toISOString(),
+                id: `system`,
             });
         };
 
@@ -782,6 +825,8 @@ const RoomPage = () => {
                             fullscreen={fullscreenChat}
                             onToggleFullscreen={handleToggleChatFullscreen}
                             isFilePanelHidden={!isFilePanelOpen}
+                            broadcastTyping={broadcastTyping}
+                            typingUsers={typingUsers}
                         />
                     </div>
 
@@ -799,6 +844,8 @@ const RoomPage = () => {
                         fullscreen={fullscreenChat}
                         onToggleFullscreen={handleToggleChatFullscreen}
                         isFilePanelHidden={!isFilePanelOpen}
+                        broadcastTyping={broadcastTyping}
+                        typingUsers={typingUsers}
                     />
                 </div>
 

@@ -16,10 +16,10 @@ const RoomPage = () => {
 
     const navigate = useNavigate();
     const { roomId } = useParams<{ roomId: string }>();
-    // const [myName, setMyName] = useState(localStorage.getItem("name") || " ");
-    const [myName, setMyName] = useState(
-        `user-${Math.floor(Math.random() * 1000) + 1}`
-    );
+    const [myName, setMyName] = useState(localStorage.getItem("name") || " ");
+    // const [myName, setMyName] = useState(
+    //     `user-${Math.floor(Math.random() * 1000) + 1}`
+    // );
     const [connected, setConnected] = useState(false);
     const [users, setUsers] = useState<User[]>([]);
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -31,6 +31,7 @@ const RoomPage = () => {
     const [isFilePanelOpen, setIsFilePanelOpen] = useState(true);
     const [fullscreenFilePanel, setFullscreenFilePanel] = useState(false);
     const [fullscreenChat, setFullscreenChat] = useState(false);
+    const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
     const [downloadedFilesids, setDownloadedFilesIds] = useState<string[]>([]);
     const [downloadingFileIds, setDownloadingFileIds] = useState<string[]>([]);
     const [typingUsers, setTypingUsers] = useState<string[]>([]);
@@ -43,7 +44,16 @@ const RoomPage = () => {
     const incomingFilesRef = useRef<Record<string, Uint8Array[]>>({});
     const activeTransfersRef = useRef<Record<string, AbortController>>({});
     const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [mentionQuery, setMentionQuery] = useState("");
+    const [showMentionList, setShowMentionList] = useState(false);
 
+    const handleUpdateMentionQuery = (text: string) => {
+        setMentionQuery(text);
+    };
+
+    const handleShowMentionList = (show: boolean) => {
+        setShowMentionList(show);
+    };
 
     const [transferStats, setTransferStats] = useState<{
         [fileId: string]: {
@@ -415,12 +425,22 @@ const RoomPage = () => {
         });
     };
 
+    const handleSetReplyingTo = (message: ChatMessage | null) => {
+        setReplyingTo(message);
+    }
+
     const sendChatMessage = async () => {
         if (!chatInput.trim() || !roomId) return;
+        const mentions = Array.from(
+            new Set(
+                chatInput.match(/@(\w+)/g)?.map(m => m.slice(1)) ?? []
+            )
+        );
         setIsMessageSending(true);
         try {
-            await initiateMessage(roomId, myName, chatInput);
+            await initiateMessage(roomId, myName, chatInput, replyingTo?.id, mentions);
             setChatInput("");
+            setReplyingTo(null);
         } catch (error) {
             console.log("Error saving chat message:", error);
             alert("Failed to send message. Please try again.");
@@ -903,6 +923,13 @@ const RoomPage = () => {
                             handleReact={handleReact}
                             clearReaction={clearReaction}
                             isLoading={isMessageSending}
+                            handleSetReplyingTo={handleSetReplyingTo}
+                            replyTo={replyingTo}
+                            handleShowMentionList={handleShowMentionList}
+                            showMentionList={showMentionList}
+                            mentionQuery={mentionQuery}
+                            handleUpdateMentionQuery={handleUpdateMentionQuery}
+                            users={users.map(u => u.userName)}
                         />
                     </div>
 
@@ -925,6 +952,13 @@ const RoomPage = () => {
                         handleReact={handleReact}
                         clearReaction={clearReaction}
                         isLoading={isMessageSending}
+                        handleSetReplyingTo={handleSetReplyingTo}
+                        replyTo={replyingTo}
+                        handleShowMentionList={handleShowMentionList}
+                        showMentionList={showMentionList}
+                        mentionQuery={mentionQuery}
+                        handleUpdateMentionQuery={handleUpdateMentionQuery}
+                        users={users.map(u => u.userName)}
                     />
                 </div>
 

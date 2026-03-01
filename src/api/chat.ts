@@ -1,10 +1,12 @@
 import { api } from "./axios";
 
-export const initiateMessage = async (roomId: string, sender: string, message: string) => {
+export const initiateMessage = async (roomId: string, sender: string, message: string, replyToId?: string, mentions?: string[]) => {
     const { data } = await api.post("/chats", {
         roomId,
         sender,
-        message
+        message,
+        replyToId,
+        mentions
     });
     return data;
 };

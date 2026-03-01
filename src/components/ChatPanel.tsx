@@ -1,5 +1,5 @@
 import React from "react";
-import { Expand, Heart, Loader, Minimize, Radio, Reply, Send, SmilePlus, X } from "lucide-react";
+import { Expand, Loader, Minimize, Radio, Reply, Send, SmilePlus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import formatTime from "../utils/formatTime";
 import type { ChatMessage } from "../types";
@@ -22,6 +22,13 @@ interface Props {
     handleReact: (messageId: string, reactionKey: string) => void;
     clearReaction: (messageId: string) => void;
     isLoading: boolean;
+    handleSetReplyingTo: (message: ChatMessage | null) => void;
+    replyTo: ChatMessage | null;
+    handleShowMentionList: (show: boolean) => void;
+    showMentionList: boolean;
+    mentionQuery: string;
+    handleUpdateMentionQuery: (text: string) => void;
+    users: string[];
 }
 
 const ChatPanel: React.FC<Props> = ({
@@ -39,15 +46,19 @@ const ChatPanel: React.FC<Props> = ({
     handleReact,
     clearReaction,
     isLoading,
+    handleSetReplyingTo,
+    replyTo,
+    handleShowMentionList,
+    showMentionList,
+    mentionQuery,
+    handleUpdateMentionQuery,
+    users
 }) => {
-
-
-    console.log('messages', messages, myName)
 
     const isDisabled = chatInput.trim() === "" || isLoading;
     const messagesRef = useRef<HTMLDivElement | null>(null);
-    const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
     const [showReactionTrayFor, setShowReactionTray] = useState<string | null>(null);
+
 
     const handleClearReaction = (messageId: string | undefined) => {
         if (!messageId) return;
@@ -56,14 +67,33 @@ const ChatPanel: React.FC<Props> = ({
     }
 
     const handleReactMessages = (messageId: string, reactionKey: string) => {
-        console.log('messageId', messageId)
         setShowReactionTray(prev => prev === messageId ? null : messageId)
         handleReact(messageId, reactionKey);
     };
 
     const handleTyping = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-        setChatInput(e.target.value);
+        const value = e.target.value;
+        setChatInput(value);
+
+        const cursorPos = e.target.selectionStart;
+        const textBeforeCursor = value.slice(0, cursorPos);
+
+        const match = textBeforeCursor.match(/@(\w*)$/);
+
+        if (match) {
+            handleUpdateMentionQuery(match[1]); // show dropdown
+            handleShowMentionList(true);
+        } else {
+            handleShowMentionList(false);
+        }
+
         broadcastTyping();
+    };
+
+    const insertMention = (username: string) => {
+        const newText = chatInput.replace(/@(\w*)$/, `@${username} `);
+        setChatInput(newText);
+        handleShowMentionList(false);
     };
 
     /* ✅ Auto scroll to bottom when new message */
@@ -185,7 +215,27 @@ const ChatPanel: React.FC<Props> = ({
                                             <div
                                                 className={`px-4 py-3 rounded-2xl text-sm leading-relaxed backdrop-blur-md whitespace-pre-wrap wrap-break-word ${isMe ? "bg-indigo-600 text-white rounded-br-sm shadow-indigo-900/30 shadow-lg" : "bg-slate-800/80 text-white rounded-bl-sm shadow-black/30 shadow-md"}`}
                                             >
-                                                <div>{msg.message}</div>
+                                                {msg.replyTo && (
+                                                    <div className="mb-2 p-2 bg-white/5 rounded-lg text-xs border-l-2 border-indigo-500">
+                                                        <div className="text-indigo-400 font-medium">
+                                                            {msg.replyTo.sender}
+                                                        </div>
+                                                        <div className="truncate opacity-70">
+                                                            {msg.replyTo.message}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                <div>
+                                                    {msg.message.split(/(@\w+)/g).map((part, i) =>
+                                                        part.startsWith("@") ? (
+                                                            <span key={i} className="text-indigo-400 font-medium">
+                                                                {part}
+                                                            </span>
+                                                        ) : (
+                                                            part
+                                                        )
+                                                    )}
+                                                </div>
 
                                                 <div className="mt-2 text-[11px] opacity-60 text-right">
                                                     {formatTime(msg.createdAt)}
@@ -194,22 +244,33 @@ const ChatPanel: React.FC<Props> = ({
                                             </div>
 
                                             {/* Reactions below bubble */}
-                                            {reactionEntries.length > 0 && (
-                                                <div
-                                                    className={`absolute -bottom-3 ${isMe ? "right-4" : "left-4"
-                                                        } flex gap-1`}
-                                                >
-                                                    {reactionEntries.map(([key, users]) => (
-                                                        <div
-                                                            key={key}
-                                                            className="flex items-center gap-1 text-xs bg-black/50 px-2 py-0.5 rounded-full"
-                                                        >
-                                                            {REACTIONS.find(r => r.id === key)?.emoji}
-                                                            <span>{users.length}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
+                                            {(() => {
+                                                const visibleReactions = reactionEntries
+                                                    .map(([key, users]) => ({
+                                                        key,
+                                                        users: users.filter(u => u !== myName),
+                                                    }))
+                                                    .filter(r => r.users.length > 0);
+
+                                                if (visibleReactions.length === 0) return null;
+
+                                                return (
+                                                    <div
+                                                        className={`absolute -bottom-3 ${isMe ? "right-4" : "left-4"
+                                                            } flex gap-1`}
+                                                    >
+                                                        {visibleReactions.map(({ key, users }) => (
+                                                            <div
+                                                                key={key}
+                                                                className="flex items-center gap-1 text-xs bg-black/50 px-2 py-0.5 rounded-full"
+                                                            >
+                                                                {REACTIONS.find(r => r.id === key)?.emoji}
+                                                                <span>{users.length}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                );
+                                            })()}
 
                                             {/* ACTIONS */}
                                             <div className="flex items-center gap-2 shrink-0 transition relative">
@@ -245,7 +306,7 @@ const ChatPanel: React.FC<Props> = ({
                                                 )}
 
                                                 <button
-                                                    onClick={() => setReplyingTo(msg)}
+                                                    onClick={() => handleSetReplyingTo(msg)}
                                                     className="p-1 rounded-md hover:bg-white/10 transition"
                                                 >
                                                     <Reply className="w-4 h-4 text-gray-400 hover:text-white" />
@@ -264,9 +325,9 @@ const ChatPanel: React.FC<Props> = ({
             {/* Input */}
             <div className="flex gap-2 shrink-0 flex-col w-full">
                 <div
-                    className={`overflow-hidden transition-all duration-300 ease-in-out ${replyingTo ? "max-h-24 opacity-100 mb-2" : "max-h-0 opacity-0"}`}
+                    className={`overflow-hidden transition-all duration-300 ease-in-out ${replyTo ? "max-h-24 opacity-100 mb-2" : "max-h-0 opacity-0"}`}
                 >
-                    {replyingTo && (
+                    {replyTo && (
                         <div className="p-3 bg-slate-800/80 border border-white/10 rounded-xl flex items-start gap-3">
 
                             {/* Left Border Accent */}
@@ -275,16 +336,16 @@ const ChatPanel: React.FC<Props> = ({
                             {/* Text Block */}
                             <div className="flex-1 min-w-0 text-xs">
                                 <div className="text-indigo-400 font-medium truncate">
-                                    Replying to {replyingTo.sender}
+                                    Replying to {replyTo.sender}
                                 </div>
                                 <div className="text-gray-300 truncate">
-                                    {replyingTo.message}
+                                    {replyTo?.message}
                                 </div>
                             </div>
 
                             {/* Close Button */}
                             <button
-                                onClick={() => setReplyingTo(null)}
+                                onClick={() => handleSetReplyingTo(null)}
                                 className="shrink-0 text-gray-400 hover:text-white transition"
                             >
                                 <X className="h-4 w-4" />
@@ -312,7 +373,24 @@ const ChatPanel: React.FC<Props> = ({
                             </div>
                         )}
                     </div>
-                    <div className="flex gap-2 w-full">
+                    <div className="flex gap-2 w-full relative">
+                        {showMentionList && (
+                            <div className="absolute bottom-20 left-5 bg-slate-800 border border-white/10 rounded-lg shadow-lg p-2 w-48">
+                                {users
+                                    .filter(u =>
+                                        u.toLowerCase().includes(mentionQuery.toLowerCase())
+                                    )
+                                    .map(user => (
+                                        <div
+                                            key={user}
+                                            onClick={() => insertMention(user)}  // 👈 HERE
+                                            className="px-2 py-1 hover:bg-white/10 cursor-pointer rounded"
+                                        >
+                                            {user}
+                                        </div>
+                                    ))}
+                            </div>
+                        )}
                         <textarea
                             rows={1}
                             value={chatInput}
@@ -328,7 +406,7 @@ const ChatPanel: React.FC<Props> = ({
                         />
 
                         <button
-                            onClick={sendChatMessage}
+                            onClick={() => sendChatMessage()}
                             disabled={isDisabled}
                             className="bg-indigo-600 hover:bg-indigo-500 active:scale-95 transition-all px-4 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
                         >

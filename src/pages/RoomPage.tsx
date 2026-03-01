@@ -6,22 +6,27 @@ import FileSharePanel from "../components/FileSharePanel";
 import RoomHeader from "../components/RoomHeader";
 import { socket } from "../socket/socket";
 import { createPeerConnection, handleIncomingPeer } from "../socket/webrtc";
-import type { ChatMessage, DataMessage, FileMeta, User } from "../types";
+import type { ChatMessage, DataMessage, FileMeta, Reaction, User } from "../types";
 import NameModal from "../components/NameModal";
 import { getChatMessages, initiateMessage } from "../api/chat";
 import { getRoom } from "../api/room";
+import { clearMessageReaction, reactMessage } from "../api/reaction";
 
 const RoomPage = () => {
 
     const navigate = useNavigate();
     const { roomId } = useParams<{ roomId: string }>();
-    const [myName, setMyName] = useState(localStorage.getItem("name") || "");
+    // const [myName, setMyName] = useState(localStorage.getItem("name") || " ");
+    const [myName, setMyName] = useState(
+        `user-${Math.floor(Math.random() * 1000) + 1}`
+    );
     const [connected, setConnected] = useState(false);
     const [users, setUsers] = useState<User[]>([]);
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [availableFiles, setAvailableFiles] = useState<FileMeta[]>([]);
     const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
     const [isChatPanelOpen, setIsChatPanelOpen] = useState(true);
+    const [isMessageSending, setIsMessageSending] = useState(false);
     const [isNameModalOpen, setIsNameModalOpen] = useState(!myName);
     const [isFilePanelOpen, setIsFilePanelOpen] = useState(true);
     const [fullscreenFilePanel, setFullscreenFilePanel] = useState(false);
@@ -329,17 +334,17 @@ const RoomPage = () => {
             /* ============================
                CHAT
             ============================ */
-            case "chat":
-                setChatMessages(prev => [
-                    ...prev,
-                    {
-                        sender: parsed.sender,
-                        message: parsed.message,
-                        createdAt: parsed.createdAt,
-                        id: parsed.id, // use provided id if available
-                    }
-                ]);
-                break;
+            // case "chat":
+            //     setChatMessages(prev => [
+            //         ...prev,
+            //         {
+            //             sender: parsed.sender,
+            //             message: parsed.message,
+            //             createdAt: parsed.createdAt,
+            //             id: parsed.id, // use provided id if available
+            //         }
+            //     ]);
+            //     break;
 
             /* ============================
                SYSTEM
@@ -412,35 +417,20 @@ const RoomPage = () => {
 
     const sendChatMessage = async () => {
         if (!chatInput.trim() || !roomId) return;
-
-        const message: DataMessage = {
-            type: "chat",
-            sender: myName,
-            message: chatInput,
-        };
-
-        // ⭐ 1. Optimistic UI (instant)
-        setChatMessages(prev => [
-            ...prev,
-            {
-                sender: myName,
-                message: chatInput,
-                createdAt: new Date().toISOString(),
-                id: `${Date.now()}`,
-            }
-        ]);
-
-        setChatInput("");
-
-        // ⭐ 2. Broadcast realtime (instant)
-        broadcastRaw(message);
-
-        // ⭐ 3. Save to DB (background)
+        setIsMessageSending(true);
         try {
-            await initiateMessage(roomId, myName, message.message);
+            await initiateMessage(roomId, myName, chatInput);
+            setChatInput("");
         } catch (error) {
             console.log("Error saving chat message:", error);
+            alert("Failed to send message. Please try again.");
+        } finally {
+            setIsMessageSending(false);
         }
+
+
+        // ⭐ 2. Broadcast realtime (instant)
+        // broadcastRaw(message);
     };
 
     const handleKickUser = (socketId: string) => {
@@ -522,17 +512,34 @@ const RoomPage = () => {
         }, 1500);
     };
 
-    useEffect(() => {
+    const clearReaction = async (messageId: string) => {
         if (!roomId) return;
-        handleLoadOldChats(1); // load first page of chats on mount
-    }, [roomId]);
+        try {
+            await clearMessageReaction(messageId, myName, roomId);
+        } catch (error) {
+            console.log("Error clearing reaction:", error);
+        }
+    };
 
+    const handleReact = async (messageId: string, reactionKey: string) => {
+        console.log('reactionKey', reactionKey)
+        if (!roomId) return;
+        try {
+            await reactMessage(reactionKey, myName, messageId, roomId);
+        } catch (error) {
+            console.log("Error toggling reaction:", error);
+        }
+    };
+
+    // socket connection and events
     useEffect(() => {
         if (!roomId || !myName) return;
 
         /* ================= CONNECT ================= */
 
         if (!socket.connected) socket.connect();
+
+        /* ================= Connect to room ================= */
 
         const joinRoom = () => {
             socket.emit("join-room", {
@@ -542,6 +549,8 @@ const RoomPage = () => {
             setIsNameModalOpen(false);
             localStorage.setItem("name", myName);
         };
+
+        /* ================= re-connect socket ================= */
 
         const handleConnect = () => {
             if (!socket.id) return;
@@ -563,6 +572,8 @@ const RoomPage = () => {
             // ⭐ then join
             joinRoom();
         };
+
+        /* ================= Name already exists ================= */
 
         const handleNameTaken = () => {
             localStorage.removeItem("name");
@@ -627,6 +638,8 @@ const RoomPage = () => {
                 sender: "System",
                 message: `${newUser.userName} joined the room`,
                 type: "system",
+                createdAt: new Date().toISOString(),
+                id: `system-${newUser.socketId}`, // unique id for this system message
             };
 
             setChatMessages(prev => [...prev, systemMessage]);
@@ -692,6 +705,8 @@ const RoomPage = () => {
                         sender: "System",
                         message: `${leavingUser.userName} left the room`,
                         type: "system",
+                        createdAt: new Date().toISOString(),
+                        id: `system-${socketId}`, // unique id for this system message
                     };
 
                     setChatMessages(prev => [...prev, systemMessage]);
@@ -710,6 +725,8 @@ const RoomPage = () => {
             }
         };
 
+        /* ================= room disconnect ================= */
+
         const handleRoomDeleted = () => {
             alert("Room has been deleted");
 
@@ -727,6 +744,52 @@ const RoomPage = () => {
             window.location.href = "/";
         };
 
+        /* ================= reaction updation ================= */
+
+        const handleReactionUpdated = ({
+            messageId,
+            reactions,
+        }: {
+            messageId: string;
+            reactions: Reaction[];
+        }) => {
+            setChatMessages(prev =>
+                prev.map(msg =>
+                    msg.id === messageId
+                        ? { ...msg, reactions }
+                        : msg
+                )
+            );
+        };
+
+        /* ================= reaction clear ================= */
+
+        const handleClearReaction = ({
+            messageId,
+            user,
+        }: {
+            messageId: string;
+            user: string;
+        }) => {
+            setChatMessages((prev) =>
+                prev.map((msg) => {
+                    if (msg.id === messageId) {
+                        const filteredReactions =
+                            msg.reactions?.filter((r) => r.user !== user) || [];
+
+                        return { ...msg, reactions: filteredReactions };
+                    }
+                    return msg;
+                })
+            );
+        };
+
+        /* ================= NEW MESSAGE ================= */
+
+        const handleNewMessage = (message: ChatMessage) => {
+            setChatMessages(prev => [...prev, message]);
+        }
+
         /* ================= REGISTER ================= */
 
         socket.on("connect", handleConnect);
@@ -739,12 +802,14 @@ const RoomPage = () => {
         socket.on("ice-candidate", handleIce);
         socket.on("user-left", handleUserLeft);
         socket.on("room-deleted", handleRoomDeleted);
+        socket.on("reaction-updated", handleReactionUpdated);
+        socket.on("new-message", handleNewMessage);
+        socket.on("reaction-cleared", handleClearReaction);
 
         // ⭐ already connected case
         if (socket.connected) handleConnect();
 
         /* ================= CLEANUP ================= */
-
         return () => {
             socket.off("connect", handleConnect);
             socket.off("name-taken", handleNameTaken);
@@ -756,12 +821,20 @@ const RoomPage = () => {
             socket.off("ice-candidate", handleIce);
             socket.off("user-left", handleUserLeft);
             socket.off("room-deleted", handleRoomDeleted);
+            socket.off("reaction-updated", handleReactionUpdated);
+            socket.off("new-message", handleNewMessage);
+            socket.off("reaction-cleared", handleClearReaction);
         };
     }, [roomId, myName]);
 
     useEffect(() => {
         if (!roomId) return;
         handleFindRoom(roomId);
+    }, [roomId]);
+
+    useEffect(() => {
+        if (!roomId) return;
+        handleLoadOldChats(1); // load first page of chats on mount
     }, [roomId]);
 
     return (
@@ -827,6 +900,9 @@ const RoomPage = () => {
                             isFilePanelHidden={!isFilePanelOpen}
                             broadcastTyping={broadcastTyping}
                             typingUsers={typingUsers}
+                            handleReact={handleReact}
+                            clearReaction={clearReaction}
+                            isLoading={isMessageSending}
                         />
                     </div>
 
@@ -846,6 +922,9 @@ const RoomPage = () => {
                         isFilePanelHidden={!isFilePanelOpen}
                         broadcastTyping={broadcastTyping}
                         typingUsers={typingUsers}
+                        handleReact={handleReact}
+                        clearReaction={clearReaction}
+                        isLoading={isMessageSending}
                     />
                 </div>
 

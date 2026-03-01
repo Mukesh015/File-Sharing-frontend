@@ -1,9 +1,11 @@
 import React from "react";
-import { Expand, Minimize, Radio, Reply, Send, SmilePlus, X } from "lucide-react";
+import { Expand, Heart, Loader, Minimize, Radio, Reply, Send, SmilePlus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import formatTime from "../utils/formatTime";
 import type { ChatMessage } from "../types";
 import { formatChatDateLabel } from "../utils/formatChatDate";
+import { REACTIONS } from "../utils/reaction";
+import type { ReactionKey } from "../utils/reaction";
 
 interface Props {
     messages: ChatMessage[];
@@ -17,6 +19,9 @@ interface Props {
     isFilePanelHidden: boolean;
     broadcastTyping: () => void;
     typingUsers: string[];
+    handleReact: (messageId: string, reactionKey: string) => void;
+    clearReaction: (messageId: string) => void;
+    isLoading: boolean;
 }
 
 const ChatPanel: React.FC<Props> = ({
@@ -31,10 +36,30 @@ const ChatPanel: React.FC<Props> = ({
     isFilePanelHidden,
     broadcastTyping,
     typingUsers = [],
+    handleReact,
+    clearReaction,
+    isLoading,
 }) => {
-    const isDisabled = chatInput.trim() === "";
+
+
+    console.log('messages', messages, myName)
+
+    const isDisabled = chatInput.trim() === "" || isLoading;
     const messagesRef = useRef<HTMLDivElement | null>(null);
     const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+    const [showReactionTrayFor, setShowReactionTray] = useState<string | null>(null);
+
+    const handleClearReaction = (messageId: string | undefined) => {
+        if (!messageId) return;
+        setShowReactionTray(null);
+        clearReaction(messageId);
+    }
+
+    const handleReactMessages = (messageId: string, reactionKey: string) => {
+        console.log('messageId', messageId)
+        setShowReactionTray(prev => prev === messageId ? null : messageId)
+        handleReact(messageId, reactionKey);
+    };
 
     const handleTyping = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         setChatInput(e.target.value);
@@ -99,7 +124,6 @@ const ChatPanel: React.FC<Props> = ({
                 className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-4 mb-4 pr-2"
             >
                 {messages.map((msg, index) => {
-
                     const isMe = msg.sender === myName;
                     const messageId = msg.id || `${index}`;
                     const currentDateLabel = formatChatDateLabel(msg.createdAt || new Date().toISOString());
@@ -111,8 +135,23 @@ const ChatPanel: React.FC<Props> = ({
                     const shouldShowDate =
                         !prevMessage || currentDateLabel !== prevDateLabel;
 
+                    const groupedReactions = msg.reactions?.reduce((acc, r) => {
+                        const key = r.reactionKey as ReactionKey;
+
+                        if (!acc[key]) acc[key] = [];
+                        acc[key].push(r.user);
+
+                        return acc;
+                    }, {} as Record<ReactionKey, string[]>) ?? {};
+
+                    const reactionEntries = Object.entries(groupedReactions) as [ReactionKey, string[]][];
+
+                    const myReactionKey = msg.reactions?.find(
+                        r => r.user === myName
+                    )?.reactionKey;
+
                     return (
-                        <React.Fragment key={messageId}>
+                        <React.Fragment key={messageId + Date.now().toString()}>
 
                             {/* ✅ DATE LABEL (Only when date changes) */}
                             {shouldShowDate && (
@@ -140,7 +179,7 @@ const ChatPanel: React.FC<Props> = ({
                                             </div>
                                         )}
 
-                                        <div className={`flex items-end gap-3 ${isMe ? "flex-row-reverse" : "flex-row"}`}>
+                                        <div className={`flex items-center gap-3 ${isMe ? "flex-row-reverse" : "flex-row"}`}>
 
                                             {/* BUBBLE */}
                                             <div
@@ -149,16 +188,60 @@ const ChatPanel: React.FC<Props> = ({
                                                 <div>{msg.message}</div>
 
                                                 <div className="mt-2 text-[11px] opacity-60 text-right">
-                                                    {formatTime(msg.createdAt || new Date().toISOString())}
+                                                    {formatTime(msg.createdAt)}
                                                 </div>
+
                                             </div>
 
+                                            {/* Reactions below bubble */}
+                                            {reactionEntries.length > 0 && (
+                                                <div
+                                                    className={`absolute -bottom-3 ${isMe ? "right-4" : "left-4"
+                                                        } flex gap-1`}
+                                                >
+                                                    {reactionEntries.map(([key, users]) => (
+                                                        <div
+                                                            key={key}
+                                                            className="flex items-center gap-1 text-xs bg-black/50 px-2 py-0.5 rounded-full"
+                                                        >
+                                                            {REACTIONS.find(r => r.id === key)?.emoji}
+                                                            <span>{users.length}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+
                                             {/* ACTIONS */}
-                                            <div className="flex items-center gap-2 shrink-0 opacity-0 group-hover:opacity-100 transition">
+                                            <div className="flex items-center gap-2 shrink-0 transition relative">
+                                                <div className={`absolute bottom-10 left-1/2 -translate-x-1/2 bg-slate-800 border border-white/10 rounded-full p-2 flex gap-2 shadow-lg ${showReactionTrayFor === messageId ? "opacity-100 scale-100" : "opacity-0 scale-75 pointer-events-none"} transition-all`}>
+                                                    {Object.entries(REACTIONS).map(([key, emoji]) => (
+                                                        <button
+                                                            key={key}
+                                                            onClick={() => handleReactMessages(msg.id, emoji.id)}
+                                                            className="text-2xl hover:scale-125 transition"
+                                                        >
+                                                            {emoji.emoji}
+                                                        </button>
+                                                    ))}
+                                                </div>
+
+                                                {/* Reaction Toggle Button */}
                                                 {!isMe && (
-                                                    <button className="p-1 rounded-md hover:bg-white/10 transition">
-                                                        <SmilePlus className="w-4 h-4 text-gray-400 hover:text-white" />
-                                                    </button>
+                                                    myReactionKey ? (
+                                                        <button
+                                                            onClick={() => handleClearReaction(msg.id)}
+                                                            className="text-xl transition hover:scale-110"
+                                                        >
+                                                            {REACTIONS.find(r => r.id === myReactionKey)?.emoji}
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => setShowReactionTray(msg.id || "")}
+                                                            className="p-1 rounded-md hover:bg-white/10 transition"
+                                                        >
+                                                            <SmilePlus className="w-4 h-4 text-gray-400 hover:text-white" />
+                                                        </button>
+                                                    )
                                                 )}
 
                                                 <button
@@ -181,11 +264,7 @@ const ChatPanel: React.FC<Props> = ({
             {/* Input */}
             <div className="flex gap-2 shrink-0 flex-col w-full">
                 <div
-                    className={`
-        overflow-hidden
-        transition-all duration-300 ease-in-out
-        ${replyingTo ? "max-h-24 opacity-100 mb-2" : "max-h-0 opacity-0"}
-    `}
+                    className={`overflow-hidden transition-all duration-300 ease-in-out ${replyingTo ? "max-h-24 opacity-100 mb-2" : "max-h-0 opacity-0"}`}
                 >
                     {replyingTo && (
                         <div className="p-3 bg-slate-800/80 border border-white/10 rounded-xl flex items-start gap-3">
@@ -253,7 +332,11 @@ const ChatPanel: React.FC<Props> = ({
                             disabled={isDisabled}
                             className="bg-indigo-600 hover:bg-indigo-500 active:scale-95 transition-all px-4 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            <Send className="w-4 h-4" />
+                            {isLoading ? (
+                                <Loader className="w-4 h-4 animate-spin text-white" />
+                            ) : (
+                                <Send className="w-4 h-4" />
+                            )}
                         </button>
                     </div>
                 </div>

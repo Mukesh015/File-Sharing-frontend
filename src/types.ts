@@ -1,22 +1,33 @@
+import type { ReactionKey } from "./utils/reaction";
+
 export interface User {
     socketId: string;
     userName: string;
 }
 
+export interface Reaction {
+    id: string;
+    reactionKey: ReactionKey;
+    user: string;
+    createdAt: string;
+}
+
 export interface ChatMessage {
-    id?: string;
+    id: string;
     sender: string;
     message: string;
-    createdAt?: string;   // ISO string
+    createdAt: string;   // ISO string
+
     type?: "user" | "system" | "chat";
 
     replyTo?: {
-        id?: string;
+        id: string;
         sender: string;
         message: string;
     };
-}
 
+    reactions?: Reaction[];   // ✅ ARRAY (normalized)
+}
 export interface FileMeta {
     type: "file-meta";
     fileId: string;
@@ -57,6 +68,11 @@ export type DataMessage =
     } | {
         type: "stop-typing";
         sender: string;
+    } | {
+        type: "reaction-updated";
+        messageId: string;
+        reactionKey: ReactionKey;
+        user: string;
     };
 
 

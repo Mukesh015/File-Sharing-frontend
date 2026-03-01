@@ -15,16 +15,18 @@ body {
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
+  display: none;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent; /* hide track */
+  display: none;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.6);
+  background: transparent;
   border-radius: 999px;
   transition: background 0.2s ease;
+  display: none;
 }
 
 ::-webkit-scrollbar-thumb:hover {
